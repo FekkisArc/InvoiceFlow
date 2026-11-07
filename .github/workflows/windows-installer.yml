@@ -1,0 +1,45 @@
+name: Build and publish InvoiceFlow Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.15'
+          architecture: 'x64'
+
+      - name: Install Inno Setup 6
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: cmd
+        run: build_windows_installer.bat
+
+      - name: Upload installer as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: InvoiceFlow-Windows-Installer
+          path: installer-output/InvoiceFlow_Setup_*.exe
+          if-no-files-found: error
+
+      - name: Attach installer to GitHub Release (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: InvoiceFlow ${{ github.ref_name }}
+          generate_release_notes: true
+          files: installer-output/InvoiceFlow_Setup_*.exe

@@ -1,0 +1,29 @@
+# Local build outputs
+.build/
+build/
+dist/
+installer-output/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.env
+*.log
+*.sqlite
+*.sqlite3
+*.db
+# User data and private financial documents
+Invoices/
+Originals/
+Exports/
+backups/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+*.bmp
+*.xlsx
+*.xls

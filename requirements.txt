@@ -1,0 +1,8 @@
+# Python 3.15-compatible dependency ranges
+PyMuPDF>=1.28.2,<2
+Pillow>=13,<14
+pytesseract>=0.3.10,<1
+openpyxl>=3.1,<4
+pyinstaller>=6.21,<7
+
+pywebview>=5.4,<7

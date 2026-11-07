@@ -1,0 +1,9 @@
+InvoiceFlow uses third-party open-source components.
+
+- Tesseract OCR: Apache License 2.0 (Tesseract project; Windows binaries provided by UB Mannheim)
+- Tesseract traineddata models: distributed by the Tesseract tessdata_fast project; see its repository license and attribution.
+- PyInstaller: GPLv2-or-later with the PyInstaller special exception for distributing packaged programs.
+- PyMuPDF: AGPL/commercial licensing; review the applicable license before distributing a commercial application.
+- Pillow, pytesseract, openpyxl, pywebview: review their upstream licenses and notices.
+
+This notice is not legal advice. Keep relevant upstream license texts and notices with any release. The current app also includes a LICENSE.txt file.

@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invoice OCR · Workspace</title>
+<style>
+:root{--bg:#f5f7fb;--surface:#fff;--ink:#182230;--muted:#748196;--line:#e6ebf2;--nav:#101827;--nav2:#172235;--blue:#4169e1;--blue2:#edf2ff;--green:#16865b;--amber:#b97712;--red:#c84c55;--shadow:0 4px 22px rgba(28,42,66,.045)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 Inter,"Segoe UI",Arial,sans-serif}
+.app{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100vh}
+.sidebar{background:var(--nav);color:#c6d0df;padding:24px 16px;display:flex;flex-direction:column;gap:30px}
+.brand{display:flex;align-items:center;gap:12px;padding:0 10px}.logo{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,#7190ff,#4169e1);display:grid;place-items:center;color:white;font-weight:800;font-size:19px;box-shadow:0 6px 18px #4169e155}.brand strong{display:block;color:white;font-size:15px;letter-spacing:.1px}.brand small{color:#8796ad;font-size:11px}
+.navlabel{font-size:10px;letter-spacing:1.4px;font-weight:700;color:#718099;padding:0 12px;margin:0 0 9px}.nav{display:grid;gap:5px}.nav button{border:0;background:transparent;color:#aab7ca;text-align:left;padding:11px 13px;border-radius:9px;display:flex;gap:12px;align-items:center;font:inherit;cursor:pointer}.nav button.active{background:#23314a;color:#fff}.nav button:hover{background:#1b2940}.ico{width:18px;text-align:center;font-size:16px}.sidebar-bottom{margin-top:auto;padding:15px 12px;border-top:1px solid #273347;color:#8796ad;font-size:12px}.localbadge{display:inline-flex;align-items:center;gap:6px;color:#8dd5b1;margin-top:8px}.dot{width:6px;height:6px;background:#47c78a;border-radius:50%}
+.main{min-width:0;padding:28px 34px 26px}.topbar{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:28px}.crumb{color:#8b97a9;font-size:12px;margin-bottom:5px}.page-title{font-size:27px;font-weight:750;letter-spacing:-.7px;margin:0}.sub{color:var(--muted);margin-top:5px}.actions{display:flex;gap:9px}.btn{border:1px solid var(--line);background:#fff;color:#344154;padding:10px 14px;border-radius:9px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;box-shadow:0 1px 2px #10182808}.btn:hover{background:#f9fbff;border-color:#cbd5e3}.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 4px 12px #4169e133}.btn.primary:hover{background:#355bd0}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:24px}.card{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:18px 20px;box-shadow:var(--shadow)}.cardtop{display:flex;justify-content:space-between;align-items:center;color:#7b8799;font-size:12px;font-weight:650}.cardicon{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;background:#edf2ff;color:#4169e1;font-size:16px}.metric{font-size:29px;font-weight:760;letter-spacing:-1px;margin:12px 0 3px}.cardfoot{font-size:12px;color:#8b97a8}.cardfoot .good{color:var(--green);font-weight:650}
+.panel{background:#fff;border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow);overflow:hidden}.panelhead{padding:19px 21px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);gap:14px}.panelhead h2{font-size:16px;margin:0;font-weight:720}.panelhead p{margin:4px 0 0;color:var(--muted);font-size:12px}.toolbar{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.search{position:relative}.search input{width:245px;padding:10px 12px 10px 35px;border:1px solid var(--line);border-radius:8px;outline:none;font:inherit;background:#fbfcfe}.search input:focus{border-color:#9bb0f7;box-shadow:0 0 0 3px #4169e115}.search span{position:absolute;left:12px;top:9px;color:#95a0b1}.select{border:1px solid var(--line);border-radius:8px;background:white;padding:10px 12px;color:#455268;font:inherit;outline:none}
+.tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}thead th{text-align:left;padding:12px 16px;font-size:10px;letter-spacing:.7px;text-transform:uppercase;color:#8995a7;background:#fafbfd;border-bottom:1px solid var(--line);font-weight:750}tbody td{padding:14px 16px;border-bottom:1px solid #edf0f5;color:#384558;font-size:13px}tbody tr:hover{background:#f8faff}tbody tr.selected{background:#f0f4ff}tbody tr:last-child td{border-bottom:0}.check{accent-color:var(--blue);width:15px;height:15px}.vendor{font-weight:680;color:#202d3d}.file{color:#8b97a8;font-size:12px;max-width:210px;overflow:hidden;text-overflow:ellipsis}.money{font-weight:700;font-variant-numeric:tabular-nums}.pill{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:30px;font-size:11px;font-weight:700}.pill.review{color:#a56b10;background:#fff5df}.pill.confirmed{color:#14764f;background:#e6f7ef}.pill.duplicate{color:#b83e4b;background:#fff0f1}.confidence{display:flex;align-items:center;gap:7px;color:#667386;font-size:12px}.bar{width:52px;height:5px;background:#e9edf3;border-radius:5px;overflow:hidden}.bar i{display:block;height:100%;background:#61b891;border-radius:5px}.empty{padding:50px;text-align:center;color:#8a96a8}.tablefoot{display:flex;justify-content:space-between;align-items:center;padding:13px 20px;color:#8a96a8;font-size:12px;border-top:1px solid var(--line)}.foot-actions{display:flex;gap:8px}.mini{padding:7px 10px;font-size:12px}
+.statusline{display:flex;justify-content:space-between;align-items:center;margin-top:18px;color:#8a96a8;font-size:12px}.statusleft{display:flex;align-items:center;gap:10px}.progress{height:5px;width:170px;background:#e6ebf2;border-radius:6px;overflow:hidden;display:none}.progress i{display:block;width:0;height:100%;background:var(--blue);transition:width .2s}
+.overlay{position:fixed;inset:0;background:#17223566;display:none;align-items:center;justify-content:center;padding:20px;z-index:5}.modal{background:white;border-radius:15px;width:min(850px,95vw);max-height:90vh;overflow:auto;box-shadow:0 25px 90px #15233c40}.modalhead{display:flex;justify-content:space-between;padding:20px 24px;border-bottom:1px solid var(--line)}.modalhead h3{margin:0;font-size:18px}.close{border:0;background:#f2f4f8;border-radius:8px;width:32px;height:32px;cursor:pointer}.modalbody{padding:22px 24px;display:grid;grid-template-columns:1fr 1fr;gap:15px}.field label{display:block;color:#7d899b;font-size:12px;font-weight:650;margin-bottom:6px}.field input,.field select,.field textarea{width:100%;border:1px solid #dfe5ee;border-radius:8px;padding:10px 11px;font:inherit;outline:none}.field textarea{min-height:90px;resize:vertical}.span2{grid-column:1/-1}.modalfoot{padding:15px 24px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+.toast{position:fixed;right:25px;bottom:25px;background:#182438;color:#fff;padding:13px 18px;border-radius:10px;box-shadow:0 10px 35px #0002;display:none;z-index:8}
+
+/* InvoiceFlow 4.0 refinement layer */
+:root{--radius:14px;--focus:#91a9ff}
+body{letter-spacing:-.08px}
+button,input,select,textarea{transition:background .16s ease,border-color .16s ease,box-shadow .16s ease,transform .16s ease}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #4169e144;outline-offset:2px}
+.app{min-height:100dvh}
+.sidebar{position:sticky;top:0;height:100dvh;overflow:auto;box-shadow:8px 0 28px #0d15220a;z-index:2}
+.brand{padding:3px 10px}.logo{position:relative}.logo:after{content:"";position:absolute;inset:-4px;border:1px solid #7894ff44;border-radius:15px}
+.nav button{position:relative;font-size:13px;font-weight:550;letter-spacing:.05px;min-height:42px}
+.nav button.active:before{content:"";position:absolute;left:-16px;top:9px;bottom:9px;width:3px;background:#83a0ff;border-radius:0 3px 3px 0}
+.nav button.active{box-shadow:inset 0 0 0 1px #ffffff08}
+.main{max-width:1800px;width:100%;margin:0 auto;padding:30px clamp(20px,3vw,48px)}
+.topbar{align-items:center;margin-bottom:25px}
+.page-title{font-size:clamp(24px,2vw,31px);line-height:1.2;letter-spacing:-1px}
+.sub{font-size:13px}
+.actions{align-items:center;flex-wrap:wrap}
+.btn{min-height:37px;border-radius:9px;font-size:12px;white-space:nowrap}
+.btn.primary{font-weight:700}
+.btn.utility{background:#f8faff;border-color:#e8edf5;color:#647187}
+.btn.utility kbd{font-size:10px;padding:2px 5px;border:1px solid #dce3ef;border-radius:4px;background:#fff;color:#7e899a}
+.cards{gap:14px;margin-bottom:20px}
+.card{position:relative;overflow:hidden;padding:19px 20px;border-radius:14px;transition:transform .18s ease,box-shadow .18s ease}
+.card:hover{transform:translateY(-2px);box-shadow:0 10px 30px #1d2e4b0b}
+.card:after{content:"";position:absolute;left:0;top:0;width:3px;height:100%;background:#e9efff}
+.card:nth-child(2):after{background:#f2dcae}.card:nth-child(3):after{background:#b9e8d1}.card:nth-child(4):after{background:#d8c8f8}
+.metric{font-size:31px;font-variant-numeric:tabular-nums}
+.panel{border-radius:15px;box-shadow:0 6px 30px #1c2a4207}
+.panelhead{padding:18px 21px;background:linear-gradient(180deg,#fff,#fdfdfe)}
+.panelhead h2{letter-spacing:-.25px;font-size:15px}
+.toolbar{gap:8px}
+.search input{width:min(270px,28vw);height:38px}
+.select{height:38px}
+.tablewrap{max-height:calc(100vh - 390px);min-height:260px}
+table{font-variant-numeric:tabular-nums}
+thead{position:sticky;top:0;z-index:1}
+thead th{padding:13px 14px;background:#f8fafc;white-space:nowrap}
+thead th[data-sort]:hover{color:#4169e1;background:#f1f5ff}
+tbody td{padding:13px 14px;vertical-align:middle}
+tbody tr{transition:background .12s ease}tbody tr:focus-within{outline:2px solid #4169e133;outline-offset:-2px}
+tbody tr.selected{box-shadow:inset 3px 0 #4169e1}
+tbody tr.selected td:first-child{padding-left:13px}
+.vendor{max-width:210px;overflow:hidden;text-overflow:ellipsis}
+.file{max-width:190px}
+.pill{padding:5px 10px;letter-spacing:.05px}
+.tablefoot{background:#fcfdff;position:sticky;bottom:0}
+.statusline{padding:0 2px}
+.overlay{backdrop-filter:blur(5px);background:#15223866}
+.modal{border:1px solid #ffffffb8;border-radius:17px;box-shadow:0 35px 100px #111d3340}
+.modalhead{padding:22px 25px;background:#fbfcfe;align-items:center}
+.modalbody{padding:24px 25px}
+.field input,.field select,.field textarea{padding:11px 12px;background:#fcfdff}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:#9bb0f7;box-shadow:0 0 0 3px #4169e114}
+.modalfoot{padding:16px 25px;background:#fcfdff}
+.commandbox{width:min(620px,94vw);background:#fff;border:1px solid #ffffff99;border-radius:16px;overflow:hidden;box-shadow:0 30px 100px #111d3355;align-self:flex-start;margin-top:12vh}
+.commandsearch{display:flex;align-items:center;gap:12px;padding:17px 20px;border-bottom:1px solid var(--line);font-size:20px;color:#8a96a8}
+.commandsearch input{border:0;outline:0;flex:1;font:16px inherit;color:#1c2939}
+.commandsearch kbd{font-size:10px;border:1px solid #dce3ed;padding:3px 6px;border-radius:5px}
+.commandlist{padding:8px;max-height:360px;overflow:auto}
+.commanditem{display:flex;align-items:center;justify-content:space-between;padding:12px 13px;border-radius:9px;cursor:pointer;color:#3b485c}
+.commanditem:hover,.commanditem.active{background:#eff3ff;color:#3459c9}
+.commanditem strong{font-size:13px;font-weight:650}.commanditem small{color:#8a96a8;font-size:11px}
+.commandfoot{border-top:1px solid var(--line);padding:10px 16px;font-size:11px;color:#929daf;background:#fbfcfe}
+.smallmodal{width:min(440px,94vw)}
+.columnoptions{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.columnoptions label{display:flex;align-items:center;gap:9px;color:#465469;font-size:13px}
+.columnoptions input{accent-color:#4169e1}
+.empty{padding:62px 20px!important;white-space:normal!important}
+.empty:before{content:"▤";display:block;font-size:28px;color:#b5c1d1;margin-bottom:10px}
+.toast{animation:toastIn .22s ease}
+@keyframes toastIn{from{transform:translateY(8px);opacity:0}to{transform:translateY(0);opacity:1}}
+body.compact tbody td{padding-top:8px;padding-bottom:8px}
+body.compact .tablewrap{max-height:calc(100vh - 365px)}
+body.dark{--bg:#0e1521;--surface:#151f2e;--ink:#e7edf6;--muted:#9aa8bc;--line:#283448;--shadow:0 5px 24px #0002;background:var(--bg);color:var(--ink)}
+body.dark .main{color:var(--ink)}body.dark .card,body.dark .panel,body.dark .modal,body.dark .commandbox{background:#151f2e;border-color:#283448;color:#e7edf6}
+body.dark .panelhead,body.dark .tablefoot,body.dark .modalhead,body.dark .modalfoot,body.dark .commandfoot{background:#131c29;border-color:#283448}
+body.dark .btn,body.dark .select,body.dark .search input,body.dark .field input,body.dark .field select,body.dark .field textarea{background:#1b2738;border-color:#344258;color:#dce5f2}
+body.dark thead th{background:#192536;color:#a8b6ca;border-color:#283448}body.dark tbody td{color:#c9d4e4;border-color:#253246}
+body.dark tbody tr:hover{background:#1b2a3e}body.dark tbody tr.selected{background:#203251}
+body.dark .vendor{color:#e6edf7}body.dark .pill.review{background:#3b2e1a;color:#f1c56f}body.dark .pill.confirmed{background:#17372c;color:#8bd9b2}body.dark .pill.duplicate{background:#3c232a;color:#f0a0a8}
+body.dark .field label,body.dark .commanditem{color:#b9c7d9}body.dark .commanditem:hover{background:#263650;color:#a9beff}
+body.dark .cardfoot,body.dark .sub,body.dark .crumb{color:#9aa8bc}
+body.dark .search input{background:#172334}
+@media(max-width:1100px){.main{padding:22px}.tablewrap{max-height:calc(100vh - 440px)}}
+@media(max-width:760px){.main{padding:16px}.actions .utility span{display:none}.cards{gap:10px}.card{padding:14px}.metric{font-size:25px}.panelhead{padding:15px}.search input{width:100%}.toolbar{width:100%}.tablewrap{max-height:none}.statusline{align-items:flex-start;gap:10px;flex-direction:column}}
+
+@media(max-width:1100px){.app{grid-template-columns:205px 1fr}.main{padding:24px}.cards{grid-template-columns:repeat(2,1fr)}.panelhead{align-items:flex-start;flex-direction:column}}
+@media(max-width:760px){.app{grid-template-columns:1fr}.sidebar{display:none}.main{padding:18px}.topbar{align-items:flex-start;flex-direction:column}.cards{grid-template-columns:1fr 1fr}.modalbody{grid-template-columns:1fr}.span2{grid-column:auto}}
+
+/* Invoice review: side-by-side source proof + editable fields */
+.reviewmodal{width:min(1500px,97vw);max-height:94vh}
+.reviewmodal .modalhead{position:sticky;top:0;z-index:3}
+.reviewmodal .modalbody{display:block;padding:0}
+.reviewlayout{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(390px,.85fr);min-height:68vh}
+.sourcepane{background:#f1f4f9;border-right:1px solid var(--line);padding:20px;min-width:0;max-height:76vh;overflow:auto}
+.sourcehead{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}
+.sourcehead h4{margin:0;font-size:14px;color:#27354a}
+.sourcehead p{margin:4px 0 0;font-size:11px;color:#7b8799}
+.sourcecards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.sourcecard{background:#fff;border:1px solid #dfe5ee;border-radius:12px;overflow:hidden;box-shadow:0 3px 12px #1b2b4308}
+.sourcecardhead{padding:10px 12px;border-bottom:1px solid #e8edf4;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.sourcecardhead strong{font-size:12px;overflow-wrap:anywhere;color:#344154}
+.sourcecardhead small{font-size:10px;color:#8995a7;white-space:nowrap}
+.sourcepages{padding:10px;display:grid;gap:10px}
+.sourcepage{background:#e9edf3;border-radius:8px;padding:8px;text-align:center}
+.sourcepage img{display:block;max-width:100%;max-height:540px;width:auto;height:auto;object-fit:contain;margin:auto;background:white;box-shadow:0 2px 9px #0001}
+.sourcepage label{display:block;font-size:10px;color:#69778b;margin-top:7px}
+.sourceerror{padding:14px;color:#b54b52;font-size:12px}
+.sourceempty{padding:35px;text-align:center;color:#8190a4;background:#fff;border-radius:10px}
+.reviewfields{padding:22px 24px;min-width:0;max-height:76vh;overflow:auto}
+.reviewfields h4{margin:0 0 14px;font-size:14px}
+.reviewfields .modalbodyfields{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.reviewfields .field{min-width:0}
+.reviewfields .field input,.reviewfields .field select,.reviewfields .field textarea{width:100%}
+.reviewfields .span2{grid-column:1/-1}
+.reviewfields .sourcepath{font-size:11px;color:#8794a7;overflow-wrap:anywhere}
+.ocrraw{margin-top:16px;border:1px solid var(--line);border-radius:9px;padding:10px 12px}
+.ocrraw summary{font-size:12px;font-weight:700;cursor:pointer;color:#617087}
+.ocrraw pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto;font:11px/1.5 Consolas,monospace;color:#5c687b}
+.reviewhint{font-size:11px;color:#8592a5;margin:0 0 16px}
+@media(max-width:950px){.reviewlayout{grid-template-columns:1fr}.sourcepane{border-right:0;border-bottom:1px solid var(--line);max-height:45vh}.reviewfields{max-height:none}.reviewmodal{width:98vw}}
+body.dark .sourcepane{background:#101a28;border-color:#283448}
+body.dark .sourcecard,body.dark .sourceempty{background:#151f2e;border-color:#283448}
+body.dark .sourcecardhead{border-color:#283448}
+body.dark .sourcecardhead strong,body.dark .sourcehead h4{color:#e1e9f4}
+body.dark .sourcepage{background:#202c3d}
+body.dark .sourcepage label,body.dark .reviewhint{color:#9aa8bc}
+
+ 
+/* field confidence and vendor alias UX */
+.confidence-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:4px 0 12px}
+.confidence-title{grid-column:1/-1;font-size:12px;font-weight:750;color:#344154;display:flex;flex-direction:column;gap:3px}
+.confidence-title small{font-size:10px;font-weight:500;color:#8592a4}
+.field-confidence{display:grid;grid-template-columns:1fr auto;gap:5px 8px;padding:9px 10px;border:1px solid #e2e8f0;border-radius:9px;background:#fff;font-size:11px}
+.field-confidence span{color:#59677a}.field-confidence strong{font-size:11px}
+.field-confidence i{grid-column:1/-1;height:4px;background:#edf1f6;border-radius:8px;overflow:hidden}
+.field-confidence i b{display:block;height:100%;border-radius:8px;background:#c78b38}
+.field-confidence.strong i b{background:#26966c}.field-confidence.medium i b{background:#d79a36}.field-confidence.weak i b{background:#d45b63}
+body.dark .confidence-title{color:#d9e3f2}body.dark .field-confidence{background:#182536;border-color:#2b3a4f}body.dark .field-confidence span{color:#adbbce}
+ 
+.verification-box{border:1px solid #d9e4ef;border-radius:12px;padding:13px;background:#f7faff;margin:4px 0 12px}
+.verification-title{font-size:12px;font-weight:800;color:#26374c;display:flex;justify-content:space-between;gap:8px}
+.verification-title span{font-size:10px;color:#b47722;background:#fff1d8;padding:3px 7px;border-radius:20px}
+.verification-box p{font-size:11px;color:#6d7b8e;line-height:1.5;margin:6px 0 10px}
+.verification-list{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.verifyitem{display:flex;align-items:center;gap:7px;font-size:11px;color:#46566b;background:#fff;border:1px solid #e3eaf2;padding:8px;border-radius:8px;cursor:pointer}
+.verifyitem input{accent-color:#208c68}
+body.dark .verification-box{background:#172537;border-color:#2c3d53}body.dark .verification-title{color:#dce7f5}body.dark .verifyitem{background:#1d2d40;border-color:#34465d;color:#c6d3e5}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+  <div class="brand"><div class="logo">↗</div><div><strong>InvoiceFlow</strong><small>OCR & finance workspace</small></div></div>
+  <div><div class="navlabel">WORKSPACE</div><div class="nav">
+    <button data-view="dashboard"><span class="ico">▦</span> Overview</button>
+    <button class="active" data-view="invoices"><span class="ico">▤</span> Invoice register</button>
+    <button data-view="review"><span class="ico">◉</span> Review queue</button>
+    <button data-view="duplicates"><span class="ico">⧉</span> Duplicates</button>
+  </div></div>
+  <div><div class="navlabel">TOOLS</div><div class="nav">
+    <button id="navImport"><span class="ico">＋</span> Import documents</button>
+    <button id="navExport"><span class="ico">⇩</span> Excel export</button>
+    <button id="navBackup"><span class="ico">⤓</span> Backup data</button>
+    <button id="navUpdates"><span class="ico">↻</span> Check for updates</button>
+  </div></div>
+  <div class="sidebar-bottom">PRIVATE WORKSPACE<br>Files stay on this computer<div class="localbadge"><span class="dot"></span> Local database connected</div></div>
+</aside>
+<main class="main">
+  <header class="topbar">
+    <div><div class="crumb">Workspace / <span id="crumb">Overview</span></div><h1 class="page-title" id="pageTitle">Good afternoon</h1><div class="sub">Your invoice operations, organized in one place.</div></div>
+    <div class="actions"><button class="btn utility" id="commandBtn" title="Command palette · Ctrl+K">⌘ <span>Quick actions</span> <kbd>Ctrl K</kbd></button><button class="btn utility" id="densityBtn" title="Toggle compact table">↕ <span>Compact</span></button><button class="btn utility" id="themeBtn" title="Toggle dark mode">◐</button><button class="btn" id="folderBtn">▣ &nbsp;Import folder</button><button class="btn primary" id="importBtn">＋ &nbsp;Import invoices</button></div>
+  </header>
+  <section class="cards">
+    <div class="card"><div class="cardtop">TOTAL INVOICES <span class="cardicon">▤</span></div><div class="metric" id="total">—</div><div class="cardfoot">All documents in your register</div></div>
+    <div class="card"><div class="cardtop">NEEDS REVIEW <span class="cardicon" style="background:#fff5df;color:#b97712">◉</span></div><div class="metric" id="reviewCount">—</div><div class="cardfoot">Waiting for verification</div></div>
+    <div class="card"><div class="cardtop">CONFIRMED <span class="cardicon" style="background:#e6f7ef;color:#16865b">✓</span></div><div class="metric" id="confirmed">—</div><div class="cardfoot"><span class="good">Ready for Excel summary</span></div></div>
+    <div class="card"><div class="cardtop">REVIEW RATE <span class="cardicon" style="background:#f1eaff;color:#805ad5">↗</span></div><div class="metric" id="reviewRate">—</div><div class="cardfoot">Records still requiring attention</div></div>
+  </section>
+  <section class="panel">
+    <div class="panelhead"><div><h2 id="tableTitle">Invoice register</h2><p>Search, filter, inspect and edit your invoice records.</p></div>
+      <div class="toolbar"><div class="search"><span>⌕</span><input id="search" placeholder="Search vendor, invoice, filename…"></div>
+        <select class="select" id="filter"><option value="all">All records</option><option value="review">Needs review</option><option value="confirmed">Confirmed</option><option value="duplicate">Possible duplicate</option></select>
+        <button class="btn mini" id="refreshBtn">↻ Refresh</button><button class="btn mini" id="columnsBtn" title="Show/hide columns">☷ Columns</button></div>
+    </div>
+    <div class="tablewrap"><table><thead><tr><th><input class="check" id="selectAll" type="checkbox"></th><th data-sort="invoice_date">Invoice date ↕</th><th data-sort="vendor">Vendor ↕</th><th data-sort="invoice_number">Invoice no. ↕</th><th data-sort="amount">Amount ↕</th><th data-sort="status">Status ↕</th><th>OCR signal</th><th>Source document</th><th></th></tr></thead><tbody id="tbody"><tr><td colspan="9" class="empty">Loading invoice register…</td></tr></tbody></table></div>
+    <div class="tablefoot"><span id="rowCount">0 invoices</span><div class="foot-actions"><button class="btn mini" id="reviewSelected">Review selected</button><button class="btn mini" id="copySelected">Copy rows</button><button class="btn mini" id="deleteSelected">Delete selected</button></div></div>
+  </section>
+  <div class="statusline"><div class="statusleft"><span class="dot"></span><span id="status">Connected to local invoice database</span><div class="progress" id="progress"><i id="progressbar"></i></div></div><span id="progressText">Local processing · OCR runs on your PC</span></div>
+</main>
+</div>
+<div class="overlay" id="overlay"><div class="modal reviewmodal"><div class="modalhead"><h3 id="modalTitle">Review invoice</h3><button class="close" id="closeModal">✕</button></div><div class="modalbody" id="modalBody"></div><div class="modalfoot"><button class="btn" id="cancelModal">Cancel</button><button class="btn primary" id="saveModal">Save changes</button></div></div></div>
+<div class="overlay" id="commandOverlay"><div class="commandbox"><div class="commandsearch">⌕ <input id="commandSearch" placeholder="Type an action or search…"><kbd>ESC</kbd></div><div class="commandlist" id="commandList"></div><div class="commandfoot">Navigate with mouse · Ctrl+K to open · Esc to close</div></div></div>
+<div class="overlay" id="columnsOverlay"><div class="modal smallmodal"><div class="modalhead"><h3>Customize columns</h3><button class="close" id="closeColumns">✕</button></div><div class="modalbody columnoptions" id="columnOptions"></div><div class="modalfoot"><button class="btn" id="resetColumns">Reset</button><button class="btn primary" id="applyColumns">Apply columns</button></div></div></div>
+<div class="toast" id="toast"></div>
+<script>
+let allRows=[],visibleRows=[],selected=new Set(),editing=null,activeView='invoices',busy=false,sortKey='invoice_date',sortDesc=false;
+const $=id=>document.getElementById(id);
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function money(v,c){return v?`${esc(v)} ${esc(c||'RON')}`:'—'}
+function statusPill(r){let st=(r.status||'Needs review').toLowerCase();if(st.includes('confirm'))return '<span class="pill confirmed">● Confirmed</span>';if(r.duplicate_of)return '<span class="pill duplicate">● Duplicate</span>';return '<span class="pill review">● Needs review</span>'}
+function confidence(v){let n=Math.max(0,Math.min(100,Math.round((Number(v)||0)*100)));let col=n>=75?'#61b891':n>=50?'#e5ad4c':'#dc777d';return `<div class="confidence"><div class="bar"><i style="width:${n}%;background:${col}"></i></div>${n}%</div>`}
+function render(){
+ const q=$('search').value.toLowerCase(),f=$('filter').value;
+ visibleRows=allRows.filter(r=>{
+  let text=[r.vendor,r.invoice_number,r.source_name,r.invoice_date,r.amount,r.review_notes].join(' ').toLowerCase();
+  let ok=!q||text.includes(q); if(f==='review')ok=ok&&(r.status!=='Confirmed');if(f==='confirmed')ok=ok&&(r.status==='Confirmed');if(f==='duplicate')ok=ok&&!!r.duplicate_of;
+  if(activeView==='review')ok=ok&&r.status!=='Confirmed';if(activeView==='duplicates')ok=ok&&!!r.duplicate_of;
+  return ok;
+ });
+ visibleRows.sort((a,b)=>{
+   let x=a[sortKey]??'',y=b[sortKey]??'';
+   if(sortKey==='amount'){x=parseFloat(String(x).replace(',','.'))||0;y=parseFloat(String(y).replace(',','.'))||0;return sortDesc?y-x:x-y;}
+   const cmp=String(x).localeCompare(String(y),undefined,{numeric:true,sensitivity:'base'});
+   return sortDesc?-cmp:cmp;
+ });
+ $('tbody').innerHTML=visibleRows.length?visibleRows.map(r=>`<tr data-id="${r.id}" class="${selected.has(r.id)?'selected':''}">
+ <td><input class="check rowcheck" aria-label="Select invoice ${r.id}" type="checkbox" ${selected.has(r.id)?'checked':''} data-id="${r.id}"></td>
+ <td>${esc(r.invoice_date||'—')}</td><td><div class="vendor">${esc(r.vendor||'Unrecognized vendor')}</div></td>
+ <td>${esc(r.invoice_number||'—')}</td><td class="money">${money(r.amount,r.currency)}</td><td>${statusPill(r)}</td>
+ <td>${confidence(r.ocr_confidence)}</td><td><div class="file" title="${esc(r.source_name)}">${esc(r.source_name||'')}</div></td>
+ <td><button class="btn mini edit" data-id="${r.id}">Review ↗</button></td></tr>`).join(''):'<tr><td colspan="9" class="empty">No invoices match these filters.</td></tr>';
+ $('rowCount').textContent=`${visibleRows.length} of ${allRows.length} invoices${selected.size?` · ${selected.size} selected`:''}`;applyColumnVisibility();document.querySelectorAll('.rowcheck').forEach(x=>x.onchange=()=>{let id=+x.dataset.id;x.checked?selected.add(id):selected.delete(id);render()});
+ document.querySelectorAll('tr[data-id]').forEach(tr=>tr.ondblclick=()=>openReview(+tr.dataset.id));
+ document.querySelectorAll('.edit').forEach(b=>b.onclick=()=>openReview(+b.dataset.id));
+ $('total').textContent=allRows.length.toLocaleString();let review=allRows.filter(r=>r.status!=='Confirmed').length; $('reviewCount').textContent=review.toLocaleString();$('confirmed').textContent=(allRows.length-review).toLocaleString();$('reviewRate').textContent=allRows.length?Math.round(review/allRows.length*100)+'%':'0%';
+}
+async function refresh(){try{allRows=await window.pywebview.api.get_invoices();render()}catch(e){toast('Could not load records: '+e)}}
+function toast(t){$('toast').textContent=t;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',3300)}
+function modalField(label,key,val,type='text',span=false){return `<div class="field ${span?'span2':''}"><label>${label}</label>${type==='textarea'?`<textarea id="f_${key}">${esc(val)}</textarea>`:`<input id="f_${key}" value="${esc(val)}" ${key==='id'?'readonly':''}>`}</div>`}
+function fieldMarkup(label,key,val,type='text',span=false){
+ return `<div class="field ${span?'span2':''}"><label>${label}</label>${type==='textarea'?`<textarea id="f_${key}">${esc(val)}</textarea>`:`<input id="f_${key}" value="${esc(val)}">`}</div>`;
+}
+function fieldConfidenceMarkup(record){
+ let c={};try{c=typeof record.field_confidence_json==='string'?JSON.parse(record.field_confidence_json||'{}'):(record.field_confidence_json||{})}catch(e){}
+ const labels={vendor:'Vendor',invoice_number:'Invoice number',invoice_date:'Invoice date',amount:'Payable total',currency:'Currency'};
+ const entries=Object.entries(labels).map(([k,label])=>{
+   const v=Math.max(0,Math.min(1,Number(c[k]||0))),pct=Math.round(v*100);
+   const level=pct>=80?'strong':pct>=60?'medium':'weak';
+   return `<div class="field-confidence ${level}"><span>${label}</span><strong>${pct?pct+'%':'Unscored'}</strong><i><b style="width:${pct}%"></b></i></div>`;
+ }).join('');
+ return `<div class="confidence-grid span2"><div class="confidence-title">Field-level confidence <small>Evidence heuristic · not a probability or guarantee</small></div>${entries}</div>`;
+}
+function verificationMarkup(record){
+ let v={};try{v=typeof record.verified_fields_json==='string'?JSON.parse(record.verified_fields_json||'{}'):(record.verified_fields_json||{})}catch(e){}
+ const labels={vendor:'Vendor name',invoice_number:'Invoice number',invoice_date:'Invoice date',amount:'Total payable',currency:'Currency'};
+ const checks=Object.entries(labels).map(([k,label])=>`<label class="verifyitem"><input type="checkbox" class="verifyfield" data-field="${k}" ${v[k]?'checked':''}><span>${label}</span></label>`).join('');
+ return `<div class="verification-box span2"><div class="verification-title">Manual verification <span>Required to confirm</span></div><p>Check each item only after comparing it with the original invoice. OCR confidence alone cannot confirm correctness.</p><div class="verification-list">${checks}</div></div>`;
+}
+function renderSourcePreview(data){
+ const sources=data?.sources||[];
+ if(!sources.length)return '<div class="sourceempty">No original file is available for preview.</div>';
+ return sources.map((src,i)=>{
+   const pages=(src.pages||[]).map(p=>`<div class="sourcepage"><img src="${p.data}" alt="${esc(src.name)} page ${p.page}"><label>Page ${p.page}</label></div>`).join('');
+   return `<article class="sourcecard"><div class="sourcecardhead"><strong>${esc(src.name)}</strong><small>${src.page_count||'?'} page(s)</small></div>${src.error?`<div class="sourceerror">${esc(src.error)}</div>`:''}<div class="sourcepages">${pages||'<div class="sourceempty">Preview unavailable</div>'}${src.more_pages?`<div class="sourceerror">+ ${src.more_pages} additional page(s). Open the PDF for full pages.</div>`:''}</div></article>`;
+ }).join('');
+}
+async function openReview(id){
+ editing=allRows.find(r=>r.id===id);if(!editing)return;
+ $('modalTitle').textContent=`Review invoice #${id} · ${editing.source_name||'Invoice'}`;
+ $('modalBody').innerHTML=`<div class="reviewlayout">
+ <section class="sourcepane"><div class="sourcehead"><div><h4>Original document</h4><p>Compare the source with extracted values. Each merged file is shown separately.</p></div><button class="btn mini" id="openSource">Open all originals ↗</button></div>
+ <div class="sourcecards" id="sourceCards"><div class="sourceempty">Loading original document previews…</div></div>
+ </section>
+ <section class="reviewfields"><h4>Extracted invoice details</h4><p class="reviewhint">Check each value against the original before confirming. OCR confidence measures text recognition, not field correctness.</p>
+ <div class="modalbodyfields">
+ ${fieldMarkup('Vendor / merchant','vendor',editing.vendor)}
+ ${fieldMarkup('Invoice number','invoice_number',editing.invoice_number)}
+ ${fieldMarkup('Invoice date (DD/MM/YYYY)','invoice_date',editing.invoice_date)}
+ ${fieldMarkup('Amount payable','amount',editing.amount)}
+ ${fieldMarkup('Currency','currency',editing.currency||'RON')}
+ ${fieldConfidenceMarkup(editing)}
+ ${verificationMarkup(editing)}
+ <div class="field span2"><label>Vendor aliases / abbreviation / logo text</label><input id="f_vendor_aliases" placeholder="e.g. ALTX, ALtex logo text"><small>Save recognizable short names or OCR text from the supplier logo to help match future invoices.</small></div>
+ <div class="field"><label>Review status</label><select id="f_status"><option ${editing.status!=='Confirmed'?'selected':''}>Needs review</option><option ${editing.status==='Confirmed'?'selected':''}>Confirmed</option></select></div>
+ ${fieldMarkup('Review notes','review_notes',editing.review_notes,'textarea',true)}
+ <div class="field span2"><label>OCR text confidence · not accuracy</label><div>${confidence(editing.ocr_confidence)}</div></div>
+ </div>
+ <details class="ocrraw"><summary>Show extracted OCR text</summary><pre id="ocrText">Loading OCR text…</pre></details>
+ </section></div>`;
+ $('overlay').style.display='flex';
+ $('openSource').onclick=async()=>{try{const r=await window.pywebview.api.open_original(editing.id);if(r&&r.opened)toast(`Opened ${r.opened} original file(s)${r.missing?`; ${r.missing} missing`:''}`);else toast('No original files could be opened')}catch(e){toast('Could not open source: '+e)}};
+ try{
+   const p=await window.pywebview.api.get_original_preview(editing.id);
+   $('sourceCards').innerHTML=renderSourcePreview(p);
+   $('ocrText').textContent=p?.raw_text||'No OCR text stored for this invoice.';
+   try{const aliases=await window.pywebview.api.get_vendor_aliases(editing.vendor);$('f_vendor_aliases').value=(aliases||[]).join(', ')}catch(e){}
+ }catch(e){
+   $('sourceCards').innerHTML=`<div class="sourceerror">Preview could not load: ${esc(e)}</div>`;
+   $('ocrText').textContent='OCR text could not be loaded.';
+ }
+}
+async function saveReview(){if(!editing)return;let data={id:editing.id};['vendor','invoice_number','invoice_date','amount','currency','status','review_notes'].forEach(k=>data[k]=$('f_'+k).value);data.vendor_aliases=$('f_vendor_aliases')?.value||'';data.verified_fields={};document.querySelectorAll('.verifyfield').forEach(cb=>data.verified_fields[cb.dataset.field]=cb.checked);try{await window.pywebview.api.update_invoice(data);$('overlay').style.display='none';toast('Invoice updated');await refresh()}catch(e){toast('Save failed: '+e)}}
+async function importFiles(folder=false){if(busy)return;try{let result=await (folder?window.pywebview.api.choose_folder():window.pywebview.api.choose_files());if(!result||!result.length)return;busy=true;$('progress').style.display='block';$('progressbar').style.width='2%';$('status').textContent='Preparing invoice import…';await window.pywebview.api.start_import(result);pollProgress()}catch(e){busy=false;toast('Import could not start: '+e)}}
+async function pollProgress(){if(!busy)return;try{let p=await window.pywebview.api.get_progress();$('progressbar').style.width=Math.max(2,p.percent)+'%';$('status').textContent=p.message;$('progressText').textContent=p.detail||'OCR is processing locally';if(p.done){busy=false;$('progress').style.display='none';$('status').textContent=p.message;await refresh();toast('Import finished. Review extracted fields before confirming.');return}}catch(e){}setTimeout(pollProgress,700)}
+$('importBtn').onclick=()=>importFiles(false);$('navImport').onclick=()=>importFiles(false);$('folderBtn').onclick=()=>importFiles(true);$('navExport').onclick=async()=>{try{let r=await window.pywebview.api.export_excel();if(r)toast(r)}catch(e){toast(String(e))}};
+$('navBackup').onclick=async()=>{try{let r=await window.pywebview.api.backup();if(r)toast(r)}catch(e){toast(String(e))}};
+$('navUpdates').onclick=async()=>{try{toast('Checking for InvoiceFlow updates…');let r=await window.pywebview.api.check_for_updates();if(!r)return;if(r.available){let go=confirm('InvoiceFlow '+r.latest_version+' is available.\n\nCurrent version: '+r.current_version+'\n\nDownload and run the update now? InvoiceFlow will close during installation. Your invoice data will be preserved.');if(go){let d=await window.pywebview.api.download_and_install_update(r.download_url,r.latest_version);if(d&&d.message)toast(d.message)}}else{alert('You are using the latest InvoiceFlow version ('+r.current_version+').')}}catch(e){alert('Update check failed: '+e)}};
+
+$('search').oninput=render;$('filter').onchange=render;$('refreshBtn').onclick=refresh;$('selectAll').onchange=()=>{selected.clear();if($('selectAll').checked)visibleRows.forEach(r=>selected.add(r.id));render()};
+$('reviewSelected').onclick=()=>{if(selected.size===1)openReview([...selected][0]);else toast('Select exactly one invoice to review')};
+$('copySelected').onclick=()=>{let rows=allRows.filter(r=>selected.has(r.id));let txt=rows.map(r=>[r.invoice_date,r.vendor,r.invoice_number,r.amount,r.currency,r.status].join('\t')).join('\n');navigator.clipboard.writeText(txt).then(()=>toast(`${rows.length} rows copied`))};
+$('deleteSelected').onclick=async()=>{if(!selected.size)return toast('Select invoice rows first');if(!confirm(`Delete ${selected.size} selected record(s)? Original files will not be deleted.`))return;try{await window.pywebview.api.delete_invoices([...selected]);selected.clear();await refresh();toast('Selected records deleted')}catch(e){toast(String(e))}};
+$('closeModal').onclick=$('cancelModal').onclick=()=>$('overlay').style.display='none';$('saveModal').onclick=saveReview;
+document.querySelectorAll('.nav button[data-view]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.nav button[data-view]').forEach(x=>x.classList.remove('active'));b.classList.add('active');activeView=b.dataset.view;$('crumb').textContent=b.textContent.trim();$('pageTitle').textContent=activeView==='dashboard'?'Good afternoon':activeView==='review'?'Review queue':activeView==='duplicates'?'Duplicate candidates':'Invoice register';$('tableTitle').textContent=activeView==='review'?'Invoices needing review':activeView==='duplicates'?'Possible duplicates':activeView==='dashboard'?'Latest invoice activity':'Invoice register';$('filter').value=activeView==='review'?'review':activeView==='duplicates'?'duplicate':'all';render()});
+
+// Polished workspace interactions: theme/density preferences, column visibility,
+// command palette and keyboard shortcuts.
+const columnMap={
+ date:1,vendor:2,number:3,amount:4,status:5,ocr:6,source:7,actions:8
+};
+const columnLabels={date:'Invoice date',vendor:'Vendor',number:'Invoice number',amount:'Amount',status:'Status',ocr:'OCR signal',source:'Source document',actions:'Actions'};
+let visibleColumns=new Set(Object.keys(columnMap));
+try{const saved=JSON.parse(localStorage.getItem('invoiceflow-columns')||'null');if(Array.isArray(saved))visibleColumns=new Set(saved.filter(k=>columnMap[k]!==undefined))}catch(e){}
+function applyColumnVisibility(){
+ Object.entries(columnMap).forEach(([key,index])=>{
+   const show=visibleColumns.has(key);
+   document.querySelectorAll(`table tr > *:nth-child(${index+1})`).forEach(cell=>cell.style.display=show?'':'none');
+ });
+}
+function openColumns(){
+ $('columnOptions').innerHTML=Object.entries(columnLabels).map(([key,label])=>
+ `<label><input type="checkbox" data-column="${key}" ${visibleColumns.has(key)?'checked':''}> ${label}</label>`).join('');
+ $('columnsOverlay').style.display='flex';
+}
+$('columnsBtn').onclick=openColumns;
+$('closeColumns').onclick=()=>$('columnsOverlay').style.display='none';
+$('resetColumns').onclick=()=>{visibleColumns=new Set(Object.keys(columnMap));openColumns()};
+$('applyColumns').onclick=()=>{
+ visibleColumns=new Set([...document.querySelectorAll('[data-column]:checked')].map(x=>x.dataset.column));
+ if(!visibleColumns.size){toast('Keep at least one invoice column visible');return}
+ try{localStorage.setItem('invoiceflow-columns',JSON.stringify([...visibleColumns]))}catch(e){}
+ applyColumnVisibility();$('columnsOverlay').style.display='none';
+};
+$('densityBtn').onclick=()=>{
+ document.body.classList.toggle('compact');
+ const compact=document.body.classList.contains('compact');
+ try{localStorage.setItem('invoiceflow-density',compact?'compact':'comfortable')}catch(e){}
+ $('densityBtn').innerHTML=compact?'↕ <span>Comfortable</span>':'↕ <span>Compact</span>';
+ toast(compact?'Compact table density enabled':'Comfortable table density enabled');
+};
+$('themeBtn').onclick=()=>{
+ document.body.classList.toggle('dark');
+ const dark=document.body.classList.contains('dark');
+ $('themeBtn').textContent=dark?'☀':'◐';
+ try{localStorage.setItem('invoiceflow-theme',dark?'dark':'light')}catch(e){}
+};
+try{
+ if(localStorage.getItem('invoiceflow-theme')==='dark'){document.body.classList.add('dark');$('themeBtn').textContent='☀'}
+ if(localStorage.getItem('invoiceflow-density')==='compact'){document.body.classList.add('compact');$('densityBtn').innerHTML='↕ <span>Comfortable</span>'}
+}catch(e){}
+const commandActions=[
+ {name:'Import invoices',hint:'Choose PDFs, images or ZIP files',run:()=>importFiles(false)},
+ {name:'Import a folder',hint:'Batch import a directory',run:()=>importFiles(true)},
+ {name:'Export Excel tracker',hint:'Create an .xlsx workbook',run:()=>$('navExport').click()},
+ {name:'Back up local data',hint:'Copy database and originals',run:()=>$('navBackup').click()},
+ {name:'Refresh invoice register',hint:'Reload the local database',run:()=>refresh()},
+ {name:'Show review queue',hint:'Filter records needing verification',run:()=>{ $('filter').value='review';activeView='review';render()}},
+ {name:'Show duplicate candidates',hint:'Inspect possible duplicates',run:()=>{ $('filter').value='duplicate';activeView='duplicates';render()}},
+ {name:'Toggle compact density',hint:'Fit more rows on screen',run:()=>$('densityBtn').click()},
+ {name:'Toggle dark mode',hint:'Switch workspace appearance',run:()=>$('themeBtn').click()},
+ {name:'Customize columns',hint:'Show or hide register columns',run:openColumns}
+];
+function renderCommands(query=''){
+ const filtered=commandActions.filter(x=>(x.name+' '+x.hint).toLowerCase().includes(query.toLowerCase()));
+ $('commandList').innerHTML=filtered.map((x,i)=>`<div class="commanditem ${i===0?'active':''}" data-command="${commandActions.indexOf(x)}"><div><strong>${esc(x.name)}</strong><br><small>${esc(x.hint)}</small></div><span>↵</span></div>`).join('')||'<div class="empty">No matching actions</div>';
+ document.querySelectorAll('.commanditem[data-command]').forEach(el=>el.onclick=()=>{let action=commandActions[+el.dataset.command];$('commandOverlay').style.display='none';action.run()});
+}
+function openCommands(){renderCommands($('commandSearch').value);$('commandOverlay').style.display='flex';$('commandSearch').focus()}
+$('commandBtn').onclick=openCommands;
+$('commandSearch').oninput=()=>renderCommands($('commandSearch').value);
+$('commandOverlay').onclick=e=>{if(e.target===$('commandOverlay'))$('commandOverlay').style.display='none'};
+$('columnsOverlay').onclick=e=>{if(e.target===$('columnsOverlay'))$('columnsOverlay').style.display='none'};
+document.addEventListener('keydown',e=>{
+ const key=e.key.toLowerCase();
+ if((e.ctrlKey||e.metaKey)&&key==='k'){e.preventDefault();openCommands()}
+ else if((e.ctrlKey||e.metaKey)&&key==='f'){e.preventDefault();$('search').focus();$('search').select()}
+ else if((e.ctrlKey||e.metaKey)&&key==='i'){e.preventDefault();importFiles(false)}
+ else if((e.ctrlKey||e.metaKey)&&key==='e'){e.preventDefault();$('navExport').click()}
+ else if(e.key==='Escape'){
+   $('overlay').style.display='none';$('commandOverlay').style.display='none';$('columnsOverlay').style.display='none';
+ }
+});
+$('pageTitle').textContent=(new Date().getHours()<12?'Good morning':new Date().getHours()<18?'Good afternoon':'Good evening');
+$('selectAll').title='Select all visible invoice rows';
+
+refresh();
+</script>
+</body></html>

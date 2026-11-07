@@ -1,0 +1,7 @@
+# Build-only requirements; install with the bundled build script
+PyMuPDF>=1.28.2,<2
+Pillow>=13,<14
+pytesseract>=0.3.10,<1
+openpyxl>=3.1,<4
+pywebview>=5.4,<7
+pyinstaller>=6.21,<7
