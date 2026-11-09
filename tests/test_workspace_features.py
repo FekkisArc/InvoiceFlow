@@ -216,7 +216,7 @@ class WorkspaceCase(unittest.TestCase):
         self.assertEqual(features.scan_watched_folders(), [])
         import os, time
         old = time.time() - 10; os.utime(document, (old, old))
-        self.assertEqual(features.scan_watched_folders(), [str(document)])
+        self.assertEqual([str(p).casefold() for p in features.scan_watched_folders()], [str(document).casefold()])
 
     def test_due_date_dashboard_counts_unpaid_past_due_invoices(self):
         self.add_invoice(due_date="01/01/2020", payment_status="Unpaid")

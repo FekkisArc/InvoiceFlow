@@ -5,6 +5,7 @@ All OCR and data storage remain on the user's computer.
 from __future__ import annotations
 import csv, difflib, hashlib, json, os, re, shutil, sqlite3, subprocess, sys, threading, zipfile
 from dataclasses import dataclass
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Optional
@@ -66,13 +67,38 @@ def find_tesseract() -> Optional[str]:
             return str(candidate)
     return shutil.which("tesseract")
 
+@contextmanager
+def _managed_sqlite_connection(database_path: Path, *, row_factory=None, timeout: int = 30):
+    """Yield a SQLite connection and always close its file handle.
+
+    sqlite3.Connection's built-in context manager commits/rolls back but does
+    not close the connection. Explicit closure is important on Windows, where
+    open database handles prevent database backups and temporary test folders
+    from being removed.
+    """
+    connection = sqlite3.connect(database_path, timeout=timeout)
+    if row_factory is not None:
+        connection.row_factory = row_factory
+    try:
+        yield connection
+        connection.commit()
+    except BaseException:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
 def db_connect():
+    """Context-managed connection to the active database; always closes it."""
     BASE.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(DB, timeout=30)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA foreign_keys=ON")
-    con.execute("PRAGMA journal_mode=WAL")
-    return con
+    @contextmanager
+    def _connection():
+        with _managed_sqlite_connection(DB, row_factory=sqlite3.Row, timeout=30) as con:
+            con.execute("PRAGMA foreign_keys=ON")
+            con.execute("PRAGMA journal_mode=WAL")
+            yield con
+    return _connection()
 
 def init_db():
     """Create and safely migrate the local database before creating indexes."""
@@ -1361,7 +1387,7 @@ def create_backup(destination: Path) -> Path:
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=False)
     backup_db = destination / "invoices.sqlite3"
-    with db_connect() as source, sqlite3.connect(backup_db) as target:
+    with db_connect() as source, _managed_sqlite_connection(backup_db) as target:
         source.backup(target)
         integrity = target.execute("PRAGMA integrity_check").fetchone()[0]
         if integrity != "ok":
@@ -1386,7 +1412,7 @@ def restore_backup(backup_directory: Path) -> Path:
     if not backup_directory.is_dir() or not backup_db.is_file():
         raise ValueError("Select an InvoiceFlow backup folder containing invoices.sqlite3.")
     # Validate completely before touching the active database.
-    with sqlite3.connect(backup_db) as check:
+    with _managed_sqlite_connection(backup_db) as check:
         integrity = check.execute("PRAGMA integrity_check").fetchone()[0]
         tables = {r[0] for r in check.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if integrity != "ok" or "invoices" not in tables:
@@ -1396,7 +1422,7 @@ def restore_backup(backup_directory: Path) -> Path:
     safety_snapshot = backup_root / f"BeforeRestore_{datetime.now():%Y%m%d_%H%M%S_%f}"
     create_backup(safety_snapshot)
     # Use SQLite's online backup API; do not replace a live WAL database file.
-    with sqlite3.connect(backup_db) as source, db_connect() as target:
+    with _managed_sqlite_connection(backup_db) as source, db_connect() as target:
         source.backup(target)
         if target.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise RuntimeError("Restored database integrity check failed.")

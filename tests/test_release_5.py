@@ -43,9 +43,16 @@ class IsolatedDatabase(unittest.TestCase):
         data.update(changes)
         return core.insert_invoice(data)
 
+    def test_database_connection_context_closes_file_handle(self):
+        with core.db_connect() as con:
+            con.execute("SELECT 1").fetchone()
+            saved_connection = con
+        with self.assertRaises(sqlite3.ProgrammingError):
+            saved_connection.execute("SELECT 1")
+
     def test_legacy_database_migrates_before_indexes(self):
         # Simulate an early MVP schema with filename/notes and no file_hash.
-        with sqlite3.connect(core.DB) as con:
+        with core._managed_sqlite_connection(core.DB) as con:
             con.execute("DROP TABLE invoices")
             con.execute("CREATE TABLE invoices(id INTEGER PRIMARY KEY, vendor TEXT, invoice_date TEXT, amount TEXT, currency TEXT, status TEXT, filename TEXT, notes TEXT, created_at TEXT)")
             con.execute("INSERT INTO invoices VALUES(1,'Old Vendor','2026-09-01','12,00','RON','Needs review','old.pdf','legacy note','2026-09-01T10:00:00')")
@@ -220,7 +227,7 @@ class IsolatedDatabase(unittest.TestCase):
         core.ORIGINALS.mkdir(parents=True, exist_ok=True)
         (core.ORIGINALS / "invoice.pdf").write_bytes(b"original")
         backup = core.create_backup(self.root / "backup")
-        with sqlite3.connect(backup / "invoices.sqlite3") as con:
+        with core._managed_sqlite_connection(backup / "invoices.sqlite3") as con:
             self.assertEqual(con.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             self.assertEqual(con.execute("SELECT COUNT(*) FROM invoices WHERE id=?", (invoice_id,)).fetchone()[0], 1)
         self.assertTrue((backup / "Originals" / "invoice.pdf").exists())
