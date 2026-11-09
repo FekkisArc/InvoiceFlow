@@ -1,56 +1,45 @@
-# InvoiceFlow 4.2.0 — Windows installer build
+# InvoiceFlow 5.1.0 — Windows installer build
 
-This folder contains the source and build recipe for a Windows 11 x64 setup wizard.
+This project builds a Windows 11 x64 setup wizard named `InvoiceFlow_Setup_5.1.0.exe`.
 
-## What the setup is designed to install
-- InvoiceFlow desktop app, packaged with PyInstaller (no Python installation required on the target PC)
-- Tesseract OCR engine from UB Mannheim (installed silently by the setup)
-- Romanian (`ron`) and English (`eng`) fast language models bundled with InvoiceFlow
-- Start Menu shortcut, optional desktop shortcut, and Windows uninstaller
-- Invoice data remains in `%LOCALAPPDATA%\\InvoiceOCR` and is intentionally not deleted by uninstall
+## What the installer includes
+- InvoiceFlow desktop app packaged with PyInstaller (the target PC does not need Python installed).
+- Tesseract OCR engine, installed silently by the setup wizard.
+- Romanian (`ron`) and English (`eng`) OCR language data.
+- Start Menu shortcut, optional desktop shortcut, and Windows uninstaller.
+- Local application data under `%LOCALAPPDATA%\\InvoiceOCR` is intentionally preserved by uninstall and upgrades.
 
-## Build requirements (only on the developer/build PC)
-1. Windows 11 x64
-2. Python 3.15 x64 and the `py` launcher
-3. Inno Setup 6 (ISCC.exe on PATH)
-4. Internet access for downloads
+## Build requirements
+1. Windows 11 x64 build machine.
+2. Python 3.15 x64 and the `py` launcher.
+3. Inno Setup 6 (`ISCC.exe` on PATH or in a standard installation directory).
+4. Internet access to retrieve Tesseract and language-data build assets.
 
 ## Build
-Double-click `build_windows_installer.bat`. It downloads the Tesseract setup executable and OCR language data, creates a build-only virtual environment, packages the app, and compiles `installer\\InvoiceFlow.iss`.
+Run `build_windows_installer.bat`. The script checks Python 3.15, downloads the pinned Tesseract 5.5.3 Windows installer and verifies its SHA-256 before embedding it, downloads the `ron`/`eng` language files, creates `.build\\venv`, installs `requirements_installer.txt`, packages `web_app.py` and `webui.html`, and compiles `installer\\InvoiceFlow.iss`.
 
-Output:
-`installer-output\\InvoiceFlow_Setup_4.2.0.exe`
+Expected output:
 
-## Installation
-Run the resulting setup executable. Administrator permission is needed because the Tesseract engine is installed under Program Files. The setup wizard can create a desktop shortcut. It also installs Tesseract OCR using the UB Mannheim Windows distribution.
+`installer-output\\InvoiceFlow_Setup_5.1.0.exe`
 
-## Important testing note
-The installer has not been executed on Windows in this environment. Test the generated setup on a clean Windows 11 x64 machine before distributing it. Verify first launch, import a real invoice, OCR language detection (`ron` and `eng`), Excel export, and uninstall behavior.
+The same build recipe runs in `.github/workflows/windows-installer.yml`. Workflow artifacts are uploaded for both `main` builds and version-tag builds. A tag push (for example `v5.1.0`) also publishes the installer to the GitHub Release.
 
-## OCR engine / data sources
-- Tesseract Windows build: UB Mannheim (Tesseract Windows installer)
-- Language models: `tessdata_fast` project (Romanian and English)
-- PyInstaller bundles Python and the app's Python dependencies into the Windows app folder.
+## Installation and data safety
+Administrator permission is required because the Tesseract engine is installed under Program Files. Invoice database, original documents, exports and settings remain under `%LOCALAPPDATA%\\InvoiceOCR`; the setup does not intentionally delete them during upgrades or uninstall.
 
-The setup uses the official project/community distribution sources and does not alter the app's invoice database during upgrade or uninstall.
+## Updater
+The updater checks the configured public GitHub repository's latest non-draft, non-prerelease release. It requires an asset named exactly `InvoiceFlow_Setup_<version>.exe`, checks that the URL belongs to the configured repository, checks file size, and verifies the GitHub-published SHA-256 digest before starting the installer. Releases without a SHA-256 digest are rejected.
+
+Default repository configuration is in `update_config.json`; a user-specific `%LOCALAPPDATA%\\InvoiceOCR\\update_config.json` takes precedence. Do not configure a repository you do not control.
+
+## Pre-release acceptance test
+The installer cannot be launched in a non-Windows environment. Test each build on a clean Windows 11 x64 machine. Verify first launch, `ron` and `eng` Tesseract availability, import of searchable and scanned PDFs, mixed PDFs, multi-part records, duplicate review, edit/re-verification, Excel export, backup/restore, updater behavior and uninstall preservation. Do not distribute solely because the source tests pass.
 
 
-## In-app updates (4.5.0)
-InvoiceFlow now has a **Check for updates** action. It checks the latest GitHub Release, downloads its Windows setup `.exe`, closes InvoiceFlow, and launches the setup silently. The setup updates the app while preserving `%LOCALAPPDATA%\\InvoiceOCR`.
+## OCR binary pin
 
-Configure the public release repository in:
-`%LOCALAPPDATA%\\InvoiceOCR\\update_config.json`
+The Windows package currently pins the Tesseract 5.5.3 x64 installer asset and verifies its published SHA-256 (`BEE9E3434BD94FD65387D9BE28CD467A41F61B1275383B55B0F59A1331270AE4`) during build. This avoids silently embedding a replaced or corrupted binary. The upstream Tesseract source has a newer 5.5.4 release, but this project has not substituted an unverified Windows installer; update the pinned binary only when a suitable Windows distribution and checksum can be independently verified.
 
-Example:
-```json
-{
-  "github_owner": "YOUR_GITHUB_USERNAME_OR_ORG",
-  "github_repo": "YOUR_PUBLIC_REPOSITORY"
-}
-```
+### Existing Tesseract installations
 
-Publish each update as a GitHub Release and attach an asset named exactly:
-`InvoiceFlow_Setup_<version>.exe`
-For example: `InvoiceFlow_Setup_4.5.0.exe`
-
-**The updater is not active until the project has a real public GitHub release repository and the release assets are published.** Do not use a repository you do not control. Installer updates should be signed before wide distribution.
+InvoiceFlow setup detects an existing Tesseract executable in the standard Program Files locations, the per-user Programs location, any directory in `PATH`, the `TESSERACT_CMD` override, and per-user/per-machine Tesseract registry install directories. When found, the bundled Tesseract setup is not even extracted to the temporary directory and is not run. If Tesseract is not detected, setup installs the bundled pinned version with Inno Setup's `/VERYSILENT /NORESTART /SP-` switches. Message-box suppression is deliberately omitted so a detection miss cannot silently auto-approve the nested installer's uninstall confirmation.

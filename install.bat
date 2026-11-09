@@ -6,7 +6,7 @@ echo ============================================================ > "%LOG%"
 echo Invoice OCR setup log - %DATE% %TIME% >> "%LOG%"
 echo ============================================================ >> "%LOG%"
 echo.
-echo InvoiceFlow 4.1.0 setup - Python 3.15
+echo InvoiceFlow 5.1.0 setup - Python 3.15
 echo Log file: "%LOG%"
 echo.
 echo [1/6] Checking Python Launcher...

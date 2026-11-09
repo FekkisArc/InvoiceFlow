@@ -12,8 +12,8 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 APP_NAME = "Invoice OCR"
-APP_VERSION = "4.5.0"
-SUPPORTED = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+APP_VERSION = "5.1.0"
+SUPPORTED = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".xml"}
 BASE = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "InvoiceOCR"
 DB = BASE / "invoices.sqlite3"
 ORIGINALS = BASE / "Originals"
@@ -33,15 +33,37 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 def find_tesseract() -> Optional[str]:
+    """Locate Tesseract from explicit config, standard folders, registry or PATH."""
     candidates = [
         Path(os.environ.get("TESSERACT_CMD", "")) if os.environ.get("TESSERACT_CMD") else None,
         Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
         Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
         Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Tesseract-OCR" / "tesseract.exe" if os.environ.get("LOCALAPPDATA") else None,
     ]
-    for p in candidates:
-        if p and p.is_file():
-            return str(p)
+    if os.name == "nt":
+        try:
+            import winreg
+            registry_keys = (
+                (r"SOFTWARE\Tesseract-OCR", "InstallDir"),
+                (r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Tesseract-OCR_is1", "InstallLocation"),
+            )
+            views = [getattr(winreg, "KEY_WOW64_64KEY", 0), getattr(winreg, "KEY_WOW64_32KEY", 0)]
+            hives = [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]
+            for hive in hives:
+                for key_name, value_name in registry_keys:
+                    for view in views:
+                        try:
+                            with winreg.OpenKey(hive, key_name, 0, winreg.KEY_READ | view) as key:
+                                install_dir, _ = winreg.QueryValueEx(key, value_name)
+                            if install_dir:
+                                candidates.append(Path(install_dir) / "tesseract.exe")
+                        except OSError:
+                            continue
+        except (ImportError, AttributeError, OSError):
+            pass
+    for candidate in candidates:
+        if candidate and candidate.is_file():
+            return str(candidate)
     return shutil.which("tesseract")
 
 def db_connect():
@@ -53,6 +75,7 @@ def db_connect():
     return con
 
 def init_db():
+    """Create and safely migrate the local database before creating indexes."""
     BASE.mkdir(parents=True, exist_ok=True)
     ORIGINALS.mkdir(parents=True, exist_ok=True)
     EXPORTS.mkdir(parents=True, exist_ok=True)
@@ -63,42 +86,61 @@ def init_db():
             invoice_number TEXT NOT NULL DEFAULT '',
             invoice_date TEXT NOT NULL DEFAULT '',
             amount TEXT NOT NULL DEFAULT '',
-            currency TEXT NOT NULL DEFAULT 'RON',
+            currency TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'Needs review',
             review_notes TEXT NOT NULL DEFAULT '',
             source_name TEXT NOT NULL DEFAULT '',
             source_path TEXT NOT NULL DEFAULT '',
+            source_input_path TEXT NOT NULL DEFAULT '',
             file_hash TEXT NOT NULL DEFAULT '',
             duplicate_of INTEGER,
             raw_text TEXT NOT NULL DEFAULT '',
             ocr_confidence REAL,
             split_group TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            field_confidence_json TEXT NOT NULL DEFAULT '{}',
+            verified_fields_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT ''
         )""")
-        con.execute("CREATE INDEX IF NOT EXISTS idx_invoice_hash ON invoices(file_hash)")
-        con.execute("CREATE INDEX IF NOT EXISTS idx_invoice_date ON invoices(invoice_date)")
-        # Safe schema evolution for databases created by earlier builds.
+
+        # Migrate first. Older releases did not necessarily contain file_hash,
+        # so creating its index before this block made upgrades fail at startup.
         cols = {r["name"] for r in con.execute("PRAGMA table_info(invoices)")}
         additions = {
-            "invoice_number": "TEXT NOT NULL DEFAULT ''", "file_hash": "TEXT NOT NULL DEFAULT ''",
-            "duplicate_of": "INTEGER", "ocr_confidence": "REAL", "updated_at": "TEXT NOT NULL DEFAULT ''",
-            "source_name": "TEXT NOT NULL DEFAULT ''", "review_notes": "TEXT NOT NULL DEFAULT ''"
+            "vendor": "TEXT NOT NULL DEFAULT ''",
+            "invoice_number": "TEXT NOT NULL DEFAULT ''",
+            "invoice_date": "TEXT NOT NULL DEFAULT ''",
+            "amount": "TEXT NOT NULL DEFAULT ''",
+            "currency": "TEXT NOT NULL DEFAULT ''",
+            "status": "TEXT NOT NULL DEFAULT 'Needs review'",
+            "review_notes": "TEXT NOT NULL DEFAULT ''",
+            "source_name": "TEXT NOT NULL DEFAULT ''",
+            "source_path": "TEXT NOT NULL DEFAULT ''",
+            "source_input_path": "TEXT NOT NULL DEFAULT ''",
+            "file_hash": "TEXT NOT NULL DEFAULT ''",
+            "duplicate_of": "INTEGER",
+            "raw_text": "TEXT NOT NULL DEFAULT ''",
+            "ocr_confidence": "REAL",
+            "split_group": "TEXT NOT NULL DEFAULT ''",
+            "field_confidence_json": "TEXT NOT NULL DEFAULT '{}'",
+            "verified_fields_json": "TEXT NOT NULL DEFAULT '{}'",
+            "created_at": "TEXT NOT NULL DEFAULT ''",
+            "updated_at": "TEXT NOT NULL DEFAULT ''",
         }
-        for name, typ in additions.items():
+        for name, definition in additions.items():
             if name not in cols:
-                con.execute(f"ALTER TABLE invoices ADD COLUMN {name} {typ}")
-        # Migrate the earlier MVP column names without discarding existing records.
+                con.execute(f"ALTER TABLE invoices ADD COLUMN {name} {definition}")
+
+        # Migrate earlier MVP column names without discarding any records.
         if "filename" in cols:
             con.execute("UPDATE invoices SET source_name=filename WHERE source_name=''")
         if "notes" in cols:
             con.execute("UPDATE invoices SET review_notes=notes WHERE review_notes=''")
         if "created_at" in cols:
             con.execute("UPDATE invoices SET updated_at=created_at WHERE updated_at=''")
-        if "field_confidence_json" not in cols:
-            con.execute("ALTER TABLE invoices ADD COLUMN field_confidence_json TEXT NOT NULL DEFAULT '{}' ")
-        if "verified_fields_json" not in cols:
-            con.execute("ALTER TABLE invoices ADD COLUMN verified_fields_json TEXT NOT NULL DEFAULT '{}' ")
+        con.execute("UPDATE invoices SET currency='' WHERE currency IS NULL")
+        con.execute("UPDATE invoices SET status='Needs review' WHERE status IS NULL OR status=''")
+
         con.execute("""CREATE TABLE IF NOT EXISTS vendor_aliases(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             canonical_name TEXT NOT NULL,
@@ -106,35 +148,78 @@ def init_db():
             alias_type TEXT NOT NULL DEFAULT 'abbreviation',
             created_at TEXT NOT NULL
         )""")
-        con.execute("""CREATE TABLE IF NOT EXISTS app_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
-        con.execute("INSERT OR IGNORE INTO app_meta(key,value) VALUES('schema_version','2')")
+        con.execute("CREATE TABLE IF NOT EXISTS app_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         con.execute("""CREATE TABLE IF NOT EXISTS audit_log(
             id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_id INTEGER, action TEXT NOT NULL,
             details TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)""")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_invoice_hash ON invoices(file_hash)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_invoice_date ON invoices(invoice_date)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_invoice_vendor_number ON invoices(vendor, invoice_number)")
+        con.execute("INSERT INTO app_meta(key,value) VALUES('schema_version','6') "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value")
 
 def records():
+    """Return records in true chronological order, including legacy ISO dates."""
     with db_connect() as con:
-        rows = con.execute("""SELECT * FROM invoices
-          ORDER BY CASE WHEN length(invoice_date)=10 THEN 0 ELSE 1 END,
-          substr(invoice_date,7,4), substr(invoice_date,4,2), substr(invoice_date,1,2), id""").fetchall()
-        return [dict(x) for x in rows]
+        rows = [dict(x) for x in con.execute("SELECT * FROM invoices").fetchall()]
+    for row in rows:
+        row["invoice_date"] = fmt_date(str(row.get("invoice_date") or "")) or str(row.get("invoice_date") or "")
+    def key(row):
+        try:
+            d = datetime.strptime(row["invoice_date"], "%d/%m/%Y")
+            return (0, d, int(row.get("id") or 0))
+        except (ValueError, TypeError):
+            return (1, datetime.max, int(row.get("id") or 0))
+    return sorted(rows, key=key)
+
 
 def parse_money(raw: str) -> Optional[float]:
-    if not raw: return None
-    s = re.sub(r"[^\d,.\-]", "", str(raw)).replace("'", "")
-    if not s: return None
+    """Parse common European and US monetary formats without losing sign."""
+    if raw is None:
+        return None
+    original = str(raw).strip()
+    if not original:
+        return None
+    negative = original.startswith("(") and original.endswith(")")
+    if negative:
+        original = original[1:-1]
+    s = re.sub(r"[^0-9,.+\-]", "", original).replace("'", "")
+    if not s or s in {"+", "-", ".", ","}:
+        return None
+    if "+" in s:
+        s = s.replace("+", "")
+    if s.count("-") > 1 or ("-" in s and not s.startswith("-")):
+        return None
     if "," in s and "." in s:
-        if s.rfind(",") > s.rfind("."): s = s.replace(".", "").replace(",", ".")
-        else: s = s.replace(",", "")
+        # The right-most separator is decimal; all preceding separators group.
+        decimal = "," if s.rfind(",") > s.rfind(".") else "."
+        grouping = "." if decimal == "," else ","
+        s = s.replace(grouping, "").replace(decimal, ".")
     elif "," in s:
-        s = s.replace(",", ".")
-    try: return float(s)
-    except ValueError: return None
+        tail = len(s.rsplit(",", 1)[1])
+        s = s.replace(",", ".") if tail in (1, 2) else s.replace(",", "")
+    elif "." in s:
+        tail = len(s.rsplit(".", 1)[1])
+        if s.count(".") > 1 or tail == 3:
+            s = s.replace(".", "")
+    try:
+        value = float(s)
+    except ValueError:
+        return None
+    if negative:
+        value = -abs(value)
+    if not (float("-1e15") < value < float("1e15")):
+        return None
+    return value
+
 
 def fmt_date(raw: str) -> str:
+    value = str(raw or "").strip()
     for fmt in ("%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
-        try: return datetime.strptime(raw, fmt).strftime("%d/%m/%Y")
-        except ValueError: pass
+        try:
+            return datetime.strptime(value, fmt).strftime("%d/%m/%Y")
+        except ValueError:
+            pass
     return ""
 
 DATE_RE = re.compile(r"\b(?:0?[1-9]|[12]\d|3[01])[./-](?:0?[1-9]|1[0-2])[./-](?:20\d{2})\b|\b20\d{2}-\d{2}-\d{2}\b")
@@ -151,10 +236,11 @@ class Extraction:
     invoice_number: str = ""
     invoice_date: str = ""
     amount: str = ""
-    currency: str = "RON"
+    currency: str = ""
     confidence: float = 0.0
     notes: str = ""
     field_confidence: dict = None
+    vat_amount: str = ""
 
 def _clean_ocr_line(line: str) -> str:
     line = re.sub(r"\s+", " ", line).strip(" |:_-")
@@ -185,42 +271,62 @@ def _vendor_alias_rows():
     except Exception:
         return []
 
+def _norm_vendor(s):
+    value = str(s or "").upper().strip()
+    translate = str.maketrans({"Ă":"A", "Â":"A", "Î":"I", "Ș":"S", "Ş":"S", "Ț":"T", "Ţ":"T"})
+    value = value.translate(translate)
+    return re.sub(r"[^A-Z0-9]", "", value)
+
+
+_GENERIC_VENDOR_ALIASES = {
+    "SRL", "SA", "SAS", "LTD", "LLC", "INC", "GMBH", "CUI", "CIF",
+    "VAT", "TVA", "FACTURA", "INVOICE", "SUPPLIER", "VENDOR", "COMPANY"
+}
+
+
 def save_vendor_alias(canonical_name: str, alias: str, alias_type: str = "abbreviation"):
-    canonical_name=(canonical_name or "").strip()
-    alias=(alias or "").strip()
-    if len(canonical_name)<2 or len(alias)<2:
+    canonical_name = (canonical_name or "").strip()
+    alias = (alias or "").strip()
+    normalized = _norm_vendor(alias)
+    if len(canonical_name) < 2 or len(normalized) < 4 or normalized in _GENERIC_VENDOR_ALIASES:
+        return False
+    # Do not allow a company suffix or a common OCR word to become a global alias.
+    if len(normalized) <= 5 and normalized in {"ROMAN", "TOTAL", "GROUP", "TRADE", "STORE"}:
         return False
     with db_connect() as con:
         con.execute("""INSERT INTO vendor_aliases(canonical_name,alias,alias_type,created_at)
             VALUES(?,?,?,?) ON CONFLICT(alias) DO UPDATE SET canonical_name=excluded.canonical_name,
             alias_type=excluded.alias_type""",
-            (canonical_name,alias,alias_type,datetime.now().isoformat(timespec="seconds")))
+            (canonical_name, alias, alias_type, datetime.now().isoformat(timespec="seconds")))
     return True
 
-def _norm_vendor(s):
-    s=(s or "").upper()
-    s=re.sub(r"[^A-Z0-9ĂÂÎȘȚ]", "", s)
-    return s
 
 def _known_vendor_alias_match(text):
-    # Match learned abbreviations/brand text conservatively. Exact normalized
-    # aliases are preferred; fuzzy matching is intentionally limited to OCR
-    # strings of at least 4 characters to avoid false vendor assignments.
-    lines=[_clean_ocr_line(x) for x in text.splitlines()[:60]]
-    aliases=_vendor_alias_rows()
-    matches=[]
+    """Match learned aliases as complete OCR tokens, not risky substrings."""
+    lines = [_clean_ocr_line(x) for x in text.splitlines()[:60]]
+    aliases = _vendor_alias_rows()
+    matches = []
     for row in aliases:
-        alias=row.get("alias","")
-        norm=_norm_vendor(alias)
-        if len(norm)<3: continue
-        for i,line in enumerate(lines):
-            line_norm=_norm_vendor(line)
-            if not line_norm: continue
-            ratio=difflib.SequenceMatcher(None,norm,line_norm).ratio() if len(line_norm)>=3 else 0
-            if norm in line_norm or line_norm in norm or (len(norm)>=4 and ratio>=0.84):
-                matches.append((100-i+(ratio*3), row["canonical_name"], alias))
+        alias = row.get("alias", "")
+        norm = _norm_vendor(alias)
+        if len(norm) < 4 or norm in _GENERIC_VENDOR_ALIASES:
+            continue
+        for i, line in enumerate(lines):
+            tokens = [_norm_vendor(t) for t in re.findall(r"[\wĂÂÎȘȚăâîșț]+", line, re.UNICODE)]
+            tokens = [t for t in tokens if t]
+            line_norm = _norm_vendor(line)
+            exact_token = norm in tokens
+            exact_line = norm == line_norm
+            phrase = len(norm) >= 6 and any("".join(tokens[j:j+n]) == norm
+                                            for n in range(2, min(5, len(tokens))+1)
+                                            for j in range(0, len(tokens)-n+1))
+            fuzzy = False
+            if len(norm) >= 7 and line_norm:
+                fuzzy = difflib.SequenceMatcher(None, norm, line_norm).ratio() >= 0.94
+            if exact_line or exact_token or phrase or fuzzy:
+                matches.append((120-i + (10 if exact_line else 5 if exact_token else 0), row["canonical_name"], alias))
                 break
-    return max(matches,key=lambda x:x[0]) if matches else None
+    return max(matches, key=lambda x: x[0]) if matches else None
 
 def extract_fields(text: str, filename: str = "") -> Extraction:
     out = Extraction()
@@ -251,76 +357,220 @@ def extract_fields(text: str, filename: str = "") -> Extraction:
         candidates=[x for x in candidates if x[0]>0]
         if candidates:
             out.vendor=max(candidates,key=lambda x:x[0])[1]
-    # Invoice number: support label/value on same or adjacent line, Romanian
-    # serial/invoice terminology and common OCR punctuation variation.
-    patterns=[
-        r"(?:factur[aă]|invoice|document)\s*(?:nr\.?|no\.?|number|#)?\s*[:\-]?\s*([A-Z0-9][A-Z0-9./_-]{2,})",
-        r"(?:num[aă]r(?:ul)?\s+factur[aă])\s*[:\-]?\s*([A-Z0-9][A-Z0-9./_-]{2,})",
-        r"(?:serie\s*(?:[șs]i\s*)?nr\.?|invoice\s*(?:id|#)|num[aă]r\s*(?:document|factur[aă]))\s*[:\-]?\s*([A-Z0-9][A-Z0-9./_-]{2,})"
+    # Invoice number: parse one line at a time. A bare "Factura" or "Invoice"
+    # header must never consume the following "BILL TO" / customer heading.
+    number_patterns = [
+        re.compile(r"(?:bon\s+fiscal)\s*(?:nr\.?|no\.?|number|#)?\s*[:\-]?\s*([A-Z0-9][A-Z0-9./_-]{5,})", re.I),
+        re.compile(r"(?:factur[aă]|invoice)\s*(?:nr\.?|no\.?|number|#)\s*[:\-]?\s*([A-Z0-9][A-Z0-9./_-]{2,})", re.I),
+        re.compile(r"(?:serie\s*/\s*num[aă]r|num[aă]r(?:ul)?\s+factur[aă]|serie\s*(?:[șs]i\s*)?nr\.?)\s*[:\-]?\s*([A-Z0-9][A-Z0-9./_-]{2,})", re.I),
+        re.compile(r"(?:factur[aă]|invoice)\s*[:\-]\s*([A-Z0-9][A-Z0-9./_-]{2,})", re.I),
+        re.compile(r"(?:factur[aă]|invoice)\s+((?=[A-Z0-9./_-]*\d)[A-Z][A-Z0-9./_-]{2,})", re.I),
     ]
-    for pat in patterns:
-        m=re.search(pat,text,re.I)
-        if m:
-            out.invoice_number=m.group(1)[:60].strip(" .,:")
+    forbidden_number_tokens = {"BILL", "BILLTO", "TO", "CUSTOMER", "CLIENT", "BUYER", "SUPPLIER", "DATE", "TOTAL", "PAGE"}
+    for idx, line in enumerate(lines):
+        candidate = ""
+        if re.search(r"\b(accum(?:ulated)?|cumulat)\b", line, re.I):
+            continue
+        for pat in number_patterns:
+            m = pat.search(line)
+            if m:
+                candidate = m.group(1).strip(" .,:;#")
+                break
+        # A genuinely split label/value can be accepted only when the value on
+        # the next line is a plausible identifier and not a common heading.
+        if not candidate and re.fullmatch(r"(?:factur[aă]|invoice)", line, re.I) and idx + 1 < len(lines):
+            nxt = lines[idx + 1].strip(" .,:;#")
+            if (re.fullmatch(r"[A-Z0-9][A-Z0-9./_-]{2,}", nxt, re.I)
+                    and any(ch.isdigit() for ch in nxt)
+                    and _norm_vendor(nxt) not in forbidden_number_tokens):
+                candidate = nxt
+        # Romanian fiscal receipts frequently print the long fiscal document
+        # number on the line immediately below a standalone BON FISCAL label.
+        if not candidate and re.fullmatch(r"BON\s+FISCAL", line, re.I) and idx + 1 < len(lines):
+            nxt = lines[idx + 1].strip(" .,:;#")
+            if re.fullmatch(r"[A-Z0-9][A-Z0-9./_-]{5,}", nxt, re.I) and sum(ch.isdigit() for ch in nxt) >= 5:
+                candidate = nxt
+        if candidate and _norm_vendor(candidate) not in forbidden_number_tokens:
+            out.invoice_number = candidate[:60]
             break
-    # Date candidates with label proximity and common Romanian label variants.
-    candidates=[]
-    for m in DATE_RE.finditer(text):
-        d=fmt_date(m.group(0))
-        if d:
-            before=text[max(0,m.start()-100):m.start()].lower()
-            after=text[m.end():m.end()+35].lower()
-            label_terms=("data fact","data emiter","data emit","invoice date","date of issue","emis","data document","factura din","issue date","data eliber")
-            score=5 if any(k in before for k in label_terms) else 1
-            if "scadent" in before or "due date" in before: score-=2
-            if any(k in after for k in ("data fact","invoice date")): score+=1
-            candidates.append((score,m.start(),d))
-    if candidates: out.invoice_date=sorted(candidates,key=lambda x:(-x[0],x[1]))[0][2]
-    # Payable total: prioritize specific labels and later totals, never subtotal-only lines.
-    total_candidates=[]
-    strong_labels=[
-        r"total\s+de\s+plat[aă]",r"total\s+factur[aă]",r"total\s+de\s+achitat",
-        r"total\s+payable",r"amount\s+due",r"total\s+to\s+pay",r"grand\s+total",
-        r"total\s+incl(?:usiv)?\s*(?:tva|vat)?",r"total\s+pl[aă]t[aă]",
-        r"suma\s+de\s+pl[aă]t[aă]",r"valoare\s+total[aă]",r"total\s+brut",
-        r"total\s+cu\s+tva",r"total\s+de\s+achitat"
-    ]
-    for i,line in enumerate(lines):
-        low=line.casefold()
-        if re.search(r"subtotal|sub\s*total|f[aă]r[aă]\s*tva|without\s*vat|net\s*total",low): continue
-        score=0
-        if any(re.search(p,low,re.I) for p in strong_labels): score=5
-        elif re.search(r"\btotal\b",low,re.I): score=2
+
+    # Invoice date: use issue-date evidence. Due dates, payment dates and
+    # delivery dates are not substitutes for the invoice issue date.
+    date_candidates = []
+    issue_terms = ("data facturii", "data emiterii", "data emit", "invoice date",
+                   "date of issue", "issue date", "issued on", "data documentului",
+                   "factura din", "data eliber")
+    due_terms = ("scadent", "due date", "payment date", "data platii", "data plății",
+                 "termen de plata", "termen de plată", "delivery date", "data livrarii",
+                 "data expedierii", "data transportului")
+    for match in DATE_RE.finditer(text):
+        value = fmt_date(match.group(0))
+        if not value:
+            continue
+        before = text[max(0, match.start()-110):match.start()].casefold()
+        after = text[match.end():match.end()+35].casefold()
+        if any(term in before for term in due_terms):
+            continue
+        score = 0
+        if any(term in before for term in issue_terms):
+            score = 6
+        elif re.search(r"\bserie\s*/\s*num[aă]r\b", before, re.I):
+            score = 5  # Romanian invoices often pair Serie/Numar with Data.
+        elif any(term in after for term in ("data facturii", "invoice date")):
+            score = 5
+        elif re.search(r"\b(bon\s+fiscal|bon\s+v[aâ]nzare|receipt|cas[aă])\b", text, re.I):
+            # A receipt's issue date is commonly printed near the top without a
+            # textual label. Keep the score below an explicit invoice-date match.
+            if match.start() < max(1, int(len(text) * 0.48)):
+                score = 3
+        elif len(DATE_RE.findall(text)) == 1:
+            score = 1  # weak candidate; show as low confidence and require review
         if score:
-            nums=MONEY_RE.findall(line)
-            # Also inspect the immediately following line when the label is isolated.
-            if not nums and i+1<len(lines): nums=MONEY_RE.findall(lines[i+1])
-            if nums: total_candidates.append((score,i,nums[-1]))
+            date_candidates.append((score, match.start(), value))
+    if date_candidates:
+        out.invoice_date = sorted(date_candidates, key=lambda x: (-x[0], x[1]))[0][2]
+
+    # Payable total: prioritize explicit payment labels; reject VAT, tax,
+    # subtotal, paid and balance lines. Use the first amount after the label,
+    # not the last number on a line (which is often the VAT amount).
+    total_candidates = []
+    strong_labels = [
+        r"total\s+de\s+plat[aă]", r"total\s+factur[aă]", r"total\s+de\s+achitat",
+        r"total\s+payable", r"amount\s+due", r"total\s+to\s+pay", r"grand\s+total",
+        r"total\s+incl(?:usiv)?\s*(?:tva|vat)?", r"total\s+pl[aă]t[aă]",
+        r"suma\s+de\s+pl[aă]t[aă]", r"valoare\s+total[aă]", r"total\s+brut",
+        r"total\s+cu\s+tva", r"net\s+payable"
+    ]
+    excluded_total_line = re.compile(
+        r"subtotal|sub\s*total|f[aă]r[aă]\s*tva|without\s*vat|net\s+total|\btva\b|\bvat\b|\btax\b|\bpaid\b|\bachitat\b.*\bavans\b",
+        re.I)
+    for i, line in enumerate(lines):
+        low = line.casefold()
+        strong_match = next((re.search(p, line, re.I) for p in strong_labels if re.search(p, line, re.I)), None)
+        generic = bool(re.search(r"\btotal\b", line, re.I))
+        score = 5 if strong_match else (1 if generic else 0)
+        if not score:
+            continue
+        if excluded_total_line.search(low) and not strong_match:
+            continue
+        number_source = line[strong_match.end():] if strong_match else line
+        first_money = MONEY_RE.search(number_source)
+        if excluded_total_line.search(number_source[:first_money.start()] if first_money else number_source):
+            continue
+        nums = MONEY_RE.findall(number_source)
+        if not nums and i+1 < len(lines):
+            next_line = lines[i+1]
+            if not excluded_total_line.search(next_line.casefold()):
+                nums = MONEY_RE.findall(next_line)
+        if nums:
+            total_candidates.append((score, i, nums[0]))
+    if not total_candidates and re.search(r"\b(bon\s+fiscal|receipt)\b", text, re.I):
+        # Receipts may label the amount by payment method rather than "total".
+        # First use a repeated amount seen in multiple non-tax, non-unit-price
+        # lines (e.g. item amount and subtotal); OCR can misread the card line.
+        repeated = {}
+        for i, line in enumerate(lines):
+            if re.search(r"\b(tva|vat|tax|accum)\b|\b\d+\s*[x×]\s*\d", line, re.I):
+                continue
+            for raw_amount in MONEY_RE.findall(line):
+                parsed = parse_money(raw_amount)
+                if parsed is not None:
+                    key = round(parsed, 2)
+                    repeated.setdefault(key, []).append((i, raw_amount))
+        repeated_candidates = [(3.5, max(v, key=lambda x: x[0])[0], v[0][1])
+                               for _, v in repeated.items() if len(v) >= 2]
+        total_candidates.extend(repeated_candidates)
+        # Payment-method fallback is deliberately lower priority than a
+        # repeated amount, and remains a manual-review candidate.
+        for i, line in enumerate(lines):
+            if not re.search(r"\b(card|cash|numerar|card\s+bank|pl[aă]tit)\b", line, re.I):
+                continue
+            if excluded_total_line.search(line):
+                continue
+            vals = MONEY_RE.findall(line)
+            if vals:
+                total_candidates.append((2.5, i, vals[0]))
     if total_candidates:
-        out.amount=sorted(total_candidates,key=lambda x:(-x[0],-x[1]))[0][2]
+        out.amount = sorted(total_candidates, key=lambda x: (-x[0], -x[1]))[0][2]
     else:
-        out.notes="Payable total not confidently identified; enter it manually."
-    # Currency, prefer explicit currency codes; infer RON only from Romanian lei markers.
-    if re.search(r"\b(EUR|EURO)\b|€",text,re.I): out.currency="EUR"
-    elif re.search(r"\bUSD\b|US\s*\$",text,re.I): out.currency="USD"
-    elif re.search(r"\bHUF\b|\bFt\b",text,re.I): out.currency="HUF"
-    elif re.search(r"\bRON\b|\bLEI\b|\bLei\b",text,re.I): out.currency="RON"
-    else: out.currency=""
+        out.notes = "Payable total not confidently identified; enter it manually."
+
+    # VAT extraction is separate from payable total. Prefer explicit tax-amount
+    # labels and do not confuse a percentage (19%) with the monetary tax value.
+    vat_candidates=[]
+    vat_labels=(r"total\s+(?:tva|vat)",r"(?:tva|vat)\s+(?:de\s+plat[aă]|amount|value)",r"(?:valoare|sum[aă])\s+(?:tva|vat)",r"(?:tva|vat)\s*[:=]")
+    for i,line in enumerate(lines):
+        if not re.search(r"\b(?:TVA|VAT)\b",line,re.I):
+            continue
+        if re.search(r"\b(?:cod|cota|rate|procent)\b",line,re.I) and not re.search(r"\d[,.]\d{2}",line):
+            continue
+        match=next((re.search(p,line,re.I) for p in vat_labels if re.search(p,line,re.I)),None)
+        if not match:
+            # A common Romanian layout is "TVA 19% 47,50"; accept the amount
+            # only when the same line explicitly contains TVA/VAT.
+            if not re.search(r"\b(?:TVA|VAT)\s+\d{1,2}\s*%",line,re.I):
+                continue
+            match=re.search(r"\b(?:TVA|VAT)\b",line,re.I)
+        source=line[match.end():]
+        nums=MONEY_RE.findall(source)
+        if not nums and i+1<len(lines) and not re.search(r"\b(?:total|invoice|factur[aă])\b",lines[i+1],re.I):
+            nums=MONEY_RE.findall(lines[i+1])
+        if nums:
+            value=parse_money(nums[0])
+            if value is not None and value>=0:
+                vat_candidates.append((3 if "total" in line.casefold() else 2,i,nums[0]))
+    if vat_candidates:
+        out.vat_amount=sorted(vat_candidates,key=lambda x:(-x[0],-x[1]))[0][2]
+
+    # Currency must be linked to a money line or an explicit currency label.
+    # A stray OCR token such as HUF inside a damaged word must not set the code.
+    currency_rules = [
+        ("EUR", r"\bEUR\b|\bEURO\b|€"),
+        ("USD", r"\bUSD\b|US\s*\$"),
+        ("HUF", r"\bHUF\b|\bFt\b"),
+        ("RON", r"\bRON\b|\bLEI\b|\bLei\b"),
+    ]
+    currency_evidence = []
+    for code, pattern in currency_rules:
+        for match in re.finditer(pattern, text, re.I):
+            line_start = text.rfind("\n", 0, match.start()) + 1
+            line_end = text.find("\n", match.end())
+            if line_end < 0: line_end = len(text)
+            line = text[line_start:line_end]
+            explicit_label = bool(re.search(r"(?:currency|moneda|valut[aă])\s*[:=]?\s*$", text[max(0, match.start()-24):match.start()], re.I))
+            if MONEY_RE.search(line) or explicit_label:
+                currency_evidence.append((match.start(), code))
+                break
+    if currency_evidence:
+        # The currency nearest the payable amount wins; absent a payable amount,
+        # preserve an explicit code without guessing from the country alone.
+        if out.amount and total_candidates:
+            try:
+                chosen_amount = total_candidates[0][2]
+                amount_pos = text.lower().find(chosen_amount.lower())
+                _, out.currency = min(currency_evidence, key=lambda x: abs(x[0] - max(0, amount_pos)))
+            except Exception:
+                out.currency = currency_evidence[0][1]
+        else:
+            out.currency = currency_evidence[0][1]
+    else:
+        out.currency=""
     # Per-field confidence is evidence-based (label match, alias match, candidate
     # ambiguity, OCR confidence are not conflated). These are heuristics, not
     # calibrated probabilities; they are used as review cues, never auto-approval.
     field_conf={}
     field_conf["vendor"]=0.90 if vendor_hits else (0.82 if alias_match else (0.52 if out.vendor else 0.0))
-    field_conf["invoice_number"]=0.88 if any(re.search(p,text,re.I) for p in patterns) and out.invoice_number else (0.45 if out.invoice_number else 0.0)
-    field_conf["invoice_date"]=0.88 if candidates and max(x[0] for x in candidates)>=5 else (0.65 if out.invoice_date else 0.0)
-    field_conf["amount"]=0.92 if total_candidates and max(x[0] for x in total_candidates)>=5 else (0.58 if out.amount else 0.0)
-    field_conf["currency"]=0.92 if re.search(r"\b(EUR|EURO|RON|LEI|USD|HUF)\b|€|US\s*\$",text,re.I) else (0.50 if out.currency else 0.0)
+    field_conf["invoice_number"]=0.88 if bool(out.invoice_number) and any(p.search(line) for line in lines for p in number_patterns) else (0.45 if out.invoice_number else 0.0)
+    field_conf["invoice_date"]=0.90 if date_candidates and max(x[0] for x in date_candidates)>=5 else (0.62 if date_candidates and max(x[0] for x in date_candidates)>=3 else (0.35 if out.invoice_date else 0.0))
+    field_conf["amount"]=0.90 if total_candidates and max(x[0] for x in total_candidates)>=5 else (0.62 if total_candidates and max(x[0] for x in total_candidates)>=2 else (0.30 if out.amount else 0.0))
+    field_conf["currency"]=0.92 if out.currency else 0.0
     out.field_confidence=field_conf
     out.confidence=sum(bool(x) for x in [out.vendor,out.invoice_number,out.invoice_date,out.amount])/4
     notes=[]
     if not out.vendor: notes.append("Vendor not detected.")
     if not out.invoice_date: notes.append("Invoice date not detected.")
     if not out.amount: notes.append("Payable total not confidently identified.")
+    if out.invoice_date and date_candidates and max(x[0] for x in date_candidates) < 5: notes.append("Date has no clear invoice-issue label; verify it against the original.")
     if not out.currency: notes.append("Currency not detected; verify it.")
     if out.amount and re.search(r"\b(subtotal|f[aă]r[aă]\s*TVA|without VAT|net)\b",text,re.I):
         notes.append("Check that the extracted amount includes VAT and is payable.")
@@ -355,16 +605,18 @@ def image_pages(path: Path):
                                     break
                         else:
                             # A text/vector PDF or a page with multiple small images.
-                            scale = min(4.0, 3200 / max(page.rect.width, page.rect.height))
+                            scale = min(5.0, 4600 / max(page.rect.width, page.rect.height))
                             pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
                             yield Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
                     except Exception as e:
                         log_error(f"PDF image extraction fallback for {path.name}: {e}")
-                        scale = min(4.0, 3200 / max(page.rect.width, page.rect.height))
+                        scale = min(5.0, 4600 / max(page.rect.width, page.rect.height))
                         pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
                         yield Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
                 else:
-                    scale = min(4.0, 3200 / max(page.rect.width, page.rect.height))
+                    # Thermal receipts often contain tiny type; retain a larger
+                    # source raster because density-cropping later makes OCR safe.
+                    scale = min(5.0, 4600 / max(page.rect.width, page.rect.height))
                     pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
                     yield Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
         finally:
@@ -415,11 +667,100 @@ def _ocr_pass(image, languages, psm, pytesseract):
     )
     text, confidence = _text_from_tesseract_data(data)
     useful = len(re.findall(r"[A-Za-zĂÂÎȘȚăâîșț0-9]", text))
-    # This score is only used to decide whether another OCR pass is warranted.
-    score = confidence + min(useful, 300) / 3000
+    # Prefer readable invoice text over a marginally higher raw Tesseract score.
+    # These are ranking heuristics only; they are not field probabilities.
+    tokens = re.findall(r"[^\s]+", text)
+    words = [t for t in tokens if re.search(r"[A-Za-zĂÂÎȘȚăâîșț]", t)]
+    readable = sum(1 for t in words if len(re.sub(r"[^A-Za-zĂÂÎȘȚăâîșț]", "", t)) >= 2)
+    readable_ratio = readable / max(1, len(words))
+    anchors = len(re.findall(
+        r"\b(?:invoice|factur[aă]|bon\s+fiscal|total|amount|payable|date|data|lei|ron|vat|tva|srl|cash|card|subtotal)\b",
+        text, re.I))
+    money_count = len(MONEY_RE.findall(text))
+    date_count = len(DATE_RE.findall(text))
+    score = (confidence * 0.58 + min(useful, 500) / 500 * 0.15
+             + min(anchors, 8) * 0.018 + min(money_count, 4) * 0.012
+             + min(date_count, 2) * 0.018 + readable_ratio * 0.08)
     if useful < 25:
         score -= 0.25
     return score, confidence, text, useful
+
+
+def _density_crop(gray, ImageFilter):
+    """Find the main printed block while ignoring isolated scanner dust.
+
+    The projection is computed on a small thumbnail to keep processing bounded
+    even for very large scans. Returns (image, crop_ratio).
+    """
+    width, height = gray.size
+    thumb_w = min(640, width)
+    thumb_h = min(900, height)
+    thumb = gray.resize((thumb_w, thumb_h)) if (thumb_w, thumb_h) != gray.size else gray
+    mask = thumb.filter(ImageFilter.MedianFilter(size=5)).point(
+        lambda value: 255 if value < 190 else 0
+    )
+    raw = mask.tobytes()
+    rows = [0] * thumb_h
+    cols = [0] * thumb_w
+    for y in range(thumb_h):
+        row = raw[y * thumb_w:(y + 1) * thumb_w]
+        rows[y] = row.count(255)
+        for x, value in enumerate(row):
+            if value:
+                cols[x] += 1
+    row_threshold = max(5, int(thumb_w * 0.008))
+    col_threshold = max(3, int(thumb_h * 0.003))
+    active_y = [i for i, count in enumerate(rows) if count >= row_threshold]
+    active_x = [i for i, count in enumerate(cols) if count >= col_threshold]
+    if not active_x or not active_y:
+        return gray, 1.0
+    sx, sy = width / thumb_w, height / thumb_h
+    pad_x, pad_y = max(24, int(width * 0.012)), max(24, int(height * 0.012))
+    x0 = max(0, int(min(active_x) * sx) - pad_x)
+    x1 = min(width, int((max(active_x) + 1) * sx) + pad_x)
+    y0 = max(0, int(min(active_y) * sy) - pad_y)
+    y1 = min(height, int((max(active_y) + 1) * sy) + pad_y)
+    if x1 <= x0 or y1 <= y0:
+        return gray, 1.0
+    candidate = gray.crop((x0, y0, x1, y1))
+    ratio = (candidate.width * candidate.height) / max(1, width * height)
+    if ratio < 0.90 and candidate.width > 220 and candidate.height > 120:
+        return candidate, ratio
+    return gray, 1.0
+
+
+def _iter_page_sources(path: Path):
+    """Yield (page_number, image, native_text) so mixed PDFs are handled per page."""
+    if path.suffix.lower() == ".pdf":
+        import fitz
+        from PIL import Image
+        import io
+        doc = fitz.open(path)
+        try:
+            for page_index, page in enumerate(doc):
+                native_text = page.get_text("text").strip()
+                useful = len(re.findall(r"[A-Za-zĂÂÎȘȚăâîșț0-9]", native_text))
+                native_tokens = re.findall(r"\b[A-Za-zĂÂÎȘȚăâîșț0-9]{2,}\b", native_text)
+                readable_ratio = sum(1 for token in native_tokens
+                                     if re.search(r"[A-Za-zĂÂÎȘȚăâîșț]", token)) / max(1, len(native_tokens))
+                # A hidden OCR layer can contain enough characters to pass a
+                # length-only check while still being mostly scanner noise.
+                if useful >= 60 and len(native_tokens) >= 8 and readable_ratio >= 0.38:
+                    yield page_index + 1, None, native_text
+                    continue
+                # Render the page through PyMuPDF rather than extracting the
+                # embedded scan image. Embedded image pixels may have a PDF
+                # placement transform (including vertical flips/rotations); the
+                # page renderer applies those transforms correctly.
+                scale = min(5.0, 4600 / max(page.rect.width, page.rect.height))
+                pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                yield page_index + 1, image, ""
+        finally:
+            doc.close()
+    else:
+        for page_no, image in enumerate(image_pages(path), 1):
+            yield page_no, image, ""
 
 
 def run_ocr(path: Path, tesseract: str, progress=None):
@@ -440,65 +781,45 @@ def run_ocr(path: Path, tesseract: str, progress=None):
     except Exception:
         languages = "ron+eng"
 
-    # Embedded PDF text avoids rasterization and OCR entirely when it is substantive.
-    if path.suffix.lower() == ".pdf":
-        try:
-            import fitz
-            with fitz.open(path) as doc:
-                native = [page.get_text("text").strip() for page in doc]
-            native_text = "\n\n--- PAGE BREAK ---\n\n".join(
-                f"--- PAGE {i+1} ---\n{x}" for i, x in enumerate(native) if x
-            )
-            useful = sum(len(re.findall(r"[A-Za-zĂÂÎȘȚăâîșț0-9]", x)) for x in native)
-            if useful >= 60:
-                return native_text, 0.99
-        except Exception as e:
-            log_error(f"Native PDF text extraction fallback for {path.name}: {e}")
-
     texts, page_confs = [], []
-    pages = image_pages(path)
-    for page_no, original in enumerate(pages, 1):
+    pages = _iter_page_sources(path)
+    for page_no, original, native_text in pages:
         if progress:
             progress(page_no, None)
+        if native_text:
+            texts.append(f"--- PAGE {page_no} [SEARCHABLE PDF TEXT] ---\n{native_text}")
+            page_confs.append(0.99)
+            log_error(f"PDF native text selected {path.name} page {page_no}: chars={len(native_text)}")
+            continue
+        # Rendered scans are already 2x for PDF. Keep a practical pixel ceiling
+        # so giant scans don't consume excessive memory or slow Tesseract.
+        base = original.convert("RGB")
         # Rendered scans are already 2x for PDF. Keep a practical pixel ceiling
         # so giant scans don't consume excessive memory or slow Tesseract.
         base = original.convert("RGB")
         w, h = base.size
         max_edge = max(w, h)
-        if max_edge > 3400:
-            scale = 3400 / max_edge
+        if max_edge > 4600:
+            scale = 4600 / max_edge
             base = base.resize((max(1, int(w*scale)), max(1, int(h*scale))), Image.Resampling.LANCZOS)
-        elif max_edge < 2500:
-            scale = min(1.65, 2500 / max_edge)
+        elif max_edge < 3800:
+            # Upsample moderate embedded receipt scans before isolating the
+            # printed block; Tesseract otherwise struggles with thermal text.
+            scale = min(1.8, 4600 / max_edge)
             base = base.resize((max(1, int(w*scale)), max(1, int(h*scale))), Image.Resampling.LANCZOS)
 
         gray = ImageOps.grayscale(base)
         contrast = ImageEnhance.Contrast(gray).enhance(1.45)
 
-        # Crop large blank margins around small receipts/invoices. Use row/column
-        # ink density so isolated scanner dust does not define the crop bounds.
+        # Crop blank margins by printed-pixel density rather than a raw bounding
+        # box: isolated scanner dust must not enlarge the crop to the whole page.
         crop_ratio = 1.0
         try:
-            # Median filtering removes isolated scanner dust; threshold + bbox
-            # then finds the main printed region without adding dependencies.
-            ink_mask = gray.filter(ImageFilter.MedianFilter(size=9)).point(
-                lambda value: 255 if value < 175 else 0
-            )
-            bbox = ink_mask.getbbox()
-            if bbox:
-                x0, y0, x1, y1 = bbox
-                pad_x = max(35, int(gray.width * 0.035))
-                pad_y = max(35, int(gray.height * 0.035))
-                x0=max(0,x0-pad_x); x1=min(gray.width,x1+pad_x)
-                y0=max(0,y0-pad_y); y1=min(gray.height,y1+pad_y)
-                candidate_crop=gray.crop((x0,y0,x1,y1))
-                crop_ratio=(candidate_crop.width*candidate_crop.height)/(gray.width*gray.height)
-                # Avoid cropping normal full-page documents or dense tables.
-                if crop_ratio < 0.82 and candidate_crop.width > 250 and candidate_crop.height > 150:
-                    gray=candidate_crop
-                    contrast=ImageEnhance.Contrast(gray).enhance(1.65)
+            gray, crop_ratio = _density_crop(gray, ImageFilter)
+            contrast = ImageEnhance.Contrast(gray).enhance(1.65 if crop_ratio < 0.90 else 1.45)
         except Exception as e:
             log_error(f"Content crop skipped ({path.name}, page {page_no}): {e}")
+            contrast = ImageEnhance.Contrast(gray).enhance(1.45)
 
         # Pass 1: normal invoice layout. image_to_data also supplies text and
         # confidence, avoiding the old duplicate image_to_string call per pass.
@@ -510,101 +831,52 @@ def run_ocr(path: Path, tesseract: str, progress=None):
             log_error(f"Primary OCR pass failed ({path.name}, page {page_no}): {e}")
 
         best = max(candidates, key=lambda x: x[0]) if candidates else None
-        # Sparse page layouts are sometimes scanned upside down. Try 180° only
-        # when the ink crop is substantially smaller than the page.
-        if crop_ratio < 0.82 and (best is None or best[1] < 0.78):
+
+        # Bound OCR retries. Earlier builds could run up to nine full-page passes
+        # plus header/footer crops even when the first result was already useful.
+        # The second pass is selected by page shape; a third is reserved for a
+        # genuinely poor result. This caps routine scans at three Tesseract calls.
+        aspect = max(contrast.size) / max(1, min(contrast.size))
+        if best is None or best[1] < 0.70 or best[3] < 45:
+            try:
+                if aspect > 3.2:
+                    retry_image, retry_psm, retry_name = contrast, 11, "sparse-layout-psm11"
+                else:
+                    retry_image, retry_psm, retry_name = ImageOps.autocontrast(gray, cutoff=1), 4, "autocontrast-psm4"
+                result = _ocr_pass(retry_image, languages, retry_psm, pytesseract)
+                candidates.append((*result, retry_name, retry_psm))
+                best = max(candidates, key=lambda x: x[0])
+            except Exception as exc:
+                log_error(f"Targeted OCR retry failed ({path.name}, page {page_no}): {exc}")
+
+        if best is None or best[1] < 0.40 or best[3] < 18:
+            try:
+                sharp = ImageEnhance.Sharpness(contrast).enhance(1.4)
+                result = _ocr_pass(sharp, languages, 6, pytesseract)
+                candidates.append((*result, "sharpened-psm6", 6))
+                best = max(candidates, key=lambda x: x[0])
+            except Exception as exc:
+                log_error(f"Final OCR retry failed ({path.name}, page {page_no}): {exc}")
+
+        # Only try a 180-degree orientation when the page is almost unreadable;
+        # low text confidence alone is common on thermal receipts and is not a
+        # reason to spend another full OCR pass.
+        if (best is None or (best[1] < 0.18 and best[3] < 10)) and crop_ratio < 0.82:
             try:
                 rotated = contrast.rotate(180, expand=True)
                 result = _ocr_pass(rotated, languages, 6, pytesseract)
                 candidates.append((*result, "crop-rot180", 6))
                 best = max(candidates, key=lambda x: x[0])
-            except Exception as e:
-                log_error(f"Rotation OCR check failed ({path.name}, page {page_no}): {e}")
-
-        # Retry only pages where the initial result is sparse or low-confidence.
-        # Use alternate layout segmentation and thresholding; don't blanket-run
-        # every variant on every page.
-        if best is None or best[1] < 0.66 or best[3] < 38:
-            # Invoice pages vary between dense tables, single-column text and sparse
-            # layouts. Tesseract's own guidance recommends trying page segmentation
-            # modes and avoiding aggressive thresholding on clean scans.
-            try:
-                from PIL import ImageFilter
-                sharp = ImageEnhance.Sharpness(contrast).enhance(1.35)
-                auto = ImageOps.autocontrast(gray, cutoff=1)
-            except Exception:
-                sharp, auto = contrast, gray
-            retry_images = [
-                ("contrast-psm4", contrast, 4),
-                ("autocontrast-psm6", auto, 6),
-            ]
-            # Add a sparse-text segmentation pass only when page layout is likely
-            # irregular (e.g. receipts, logo/header text, multi-column blocks).
-            if best is None or best[1] < 0.52:
-                retry_images.append(("contrast-psm11", contrast, 11))
-                retry_images.append(("sharpen-psm6", sharp, 6))
-            if best is None or best[1] < 0.48 or best[3] < 35:
-                retry_images.extend([
-                    ("autocontrast-psm3", auto, 3),
-                    ("sharpen-psm11", sharp, 11),
-                    ("contrast-psm3", contrast, 3),
-                ])
-            if best is None or best[1] < 0.34 or best[3] < 20:
-                # Keep thresholding as a last-resort candidate; it can harm fine
-                # print and light gray text on otherwise readable invoices.
-                threshold = contrast.point(lambda x: 255 if x > 175 else 0)
-                retry_images.append(("threshold-psm6", threshold, 6))
-            for variant_name, image, psm in retry_images:
-                try:
-                    result = _ocr_pass(image, languages, psm, pytesseract)
-                    candidates.append((*result, variant_name, psm))
-                except Exception as e:
-                    log_error(f"OCR retry failed ({path.name}, page {page_no}, {variant_name}, psm {psm}): {e}")
-            if candidates:
-                best = max(candidates, key=lambda x: x[0])
-
-        # For exceptionally weak text, test quarter-turn orientation variants.
-        # This is deliberately rare because it is much slower than normal OCR.
-        if best is None or (best[1] < 0.28 and best[3] < 30):
-            for angle in (90, 270):
-                try:
-                    rotated = contrast.rotate(angle, expand=True)
-                    result = _ocr_pass(rotated, languages, 6, pytesseract)
-                    candidates.append((*result, f"rotate-{angle}", 6))
-                except Exception as e:
-                    log_error(f"Orientation OCR retry failed ({path.name}, page {page_no}, angle {angle}): {e}")
-            if candidates:
-                best = max(candidates, key=lambda x: x[0])
+            except Exception as exc:
+                log_error(f"Orientation OCR retry failed ({path.name}, page {page_no}): {exc}")
 
         if best is None:
             raise RuntimeError("Tesseract could not produce text from this page. Check OCR language packs.")
 
-        # Header/footer OCR is expensive, so reserve it for low-confidence pages.
+        # Keep the selected full-page text intact. Regional OCR used to add two
+        # more expensive passes on nearly every weak receipt without reliably
+        # improving extraction; low-quality pages are clearly flagged for review.
         extra = ""
-        if best[1] < 0.62 or best[3] < 55:
-            try:
-                cw, ch = contrast.size
-                regions = [
-                    ("header", contrast.crop((0, 0, cw, int(ch*0.34)))),
-                    ("footer", contrast.crop((0, int(ch*0.62), cw, ch))),
-                ]
-                crop_results = []
-                for region_name, crop in regions:
-                    if crop.width < 20 or crop.height < 20:
-                        continue
-                    try:
-                        crop_text = pytesseract.image_to_string(
-                            crop, lang=languages, config="--oem 3 --psm 6"
-                        ).strip()
-                        if len(re.sub(r"\s", "", crop_text)) > 8:
-                            crop_results.append(f"--- OCR {region_name.upper()} REGION ---\n{crop_text}")
-                    except Exception as e:
-                        log_error(f"OCR crop failed ({path.name}, page {page_no}, {region_name}): {e}")
-                if crop_results:
-                    extra = "\n\n" + "\n\n".join(crop_results)
-            except Exception as e:
-                log_error(f"OCR crop processing failed ({path.name}, page {page_no}): {e}")
-
         texts.append(f"--- PAGE {page_no} ---\n{best[2]}{extra}")
         page_confs.append(best[1])
         log_error(
@@ -616,36 +888,109 @@ def run_ocr(path: Path, tesseract: str, progress=None):
     )
 
 def safe_extract_zip(zip_path: Path, dest: Path):
-    dest.mkdir(parents=True,exist_ok=True)
-    extracted=[]
-    with zipfile.ZipFile(zip_path) as z:
-        for info in z.infolist():
-            if info.is_dir(): continue
-            # Reject absolute paths, parent traversal, symlinks and absurdly large expansion.
-            pp=PurePosixPath(info.filename.replace("\\","/"))
-            if pp.is_absolute() or ".." in pp.parts: continue
-            mode=(info.external_attr >> 16) & 0o170000
-            if mode == 0o120000: continue
-            if info.file_size > 150*1024*1024: continue
-            target=(dest / Path(*pp.parts)).resolve()
-            if dest.resolve() not in target.parents: continue
-            target.parent.mkdir(parents=True,exist_ok=True)
-            with z.open(info) as src, target.open("wb") as dst:
-                shutil.copyfileobj(src,dst)
-            if target.suffix.lower() in SUPPORTED: extracted.append(target)
+    """Extract supported invoice files with traversal, size and zip-bomb guards."""
+    dest.mkdir(parents=True, exist_ok=True)
+    extracted = []
+    max_files = 2000
+    max_file_bytes = 150 * 1024 * 1024
+    max_total_bytes = 500 * 1024 * 1024
+    total_bytes = 0
+    root = dest.resolve()
+    with zipfile.ZipFile(zip_path) as archive:
+        members = archive.infolist()
+        if len(members) > max_files:
+            raise ValueError(f"ZIP contains too many entries ({len(members)}; maximum {max_files}).")
+        for info in members:
+            if info.is_dir():
+                continue
+            raw_name = info.filename.replace("\\", "/")
+            pp = PurePosixPath(raw_name)
+            if pp.is_absolute() or not pp.parts or ".." in pp.parts or "\x00" in raw_name:
+                continue
+            if any(part in {"", "."} for part in pp.parts):
+                continue
+            mode = (info.external_attr >> 16) & 0o170000
+            if mode == 0o120000:
+                continue
+            if info.file_size < 0 or info.file_size > max_file_bytes:
+                continue
+            if info.compress_size and info.file_size / info.compress_size > 500:
+                continue
+            if total_bytes + info.file_size > max_total_bytes:
+                raise ValueError("ZIP expands beyond the 500 MB safety limit.")
+            target = (root / Path(*pp.parts)).resolve()
+            if target != root and root not in target.parents:
+                continue
+            if target.exists():
+                # Avoid silently overwriting a previous member with the same name.
+                target = target.with_name(f"{target.stem}_{hashlib.sha256(raw_name.encode()).hexdigest()[:8]}{target.suffix}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            copied = 0
+            with archive.open(info) as src, target.open("wb") as dst:
+                while True:
+                    chunk = src.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    copied += len(chunk)
+                    total_bytes += len(chunk)
+                    if copied > max_file_bytes or total_bytes > max_total_bytes:
+                        dst.close()
+                        target.unlink(missing_ok=True)
+                        raise ValueError("ZIP expansion exceeded the safety limit while extracting.")
+                    dst.write(chunk)
+            if target.suffix.lower() in SUPPORTED:
+                extracted.append(target)
     return extracted
 
-def collect_inputs(paths, batch_dir):
-    files=[]
+
+def collect_inputs(paths, batch_dir, origin_map=None):
+    """Collect PDFs/images and optionally map ZIP-extracted files to their source archive."""
+    files = []
+    zip_files = []
+    seen = set()
     for raw in paths:
-        p=Path(raw)
+        p = Path(raw)
         if p.is_dir():
-            for f in p.rglob("*"):
-                if f.is_file() and f.suffix.lower() in SUPPORTED: files.append(f)
-        elif p.suffix.lower()==".zip":
-            files.extend(safe_extract_zip(p,batch_dir/(p.stem+"_contents")))
-        elif p.suffix.lower() in SUPPORTED: files.append(p)
-    return sorted(set(files), key=lambda x:x.name.casefold())
+            try:
+                candidates = p.rglob("*")
+                root_resolved = p.resolve()
+                for f in candidates:
+                    if not f.is_file():
+                        continue
+                    try:
+                        f.resolve().relative_to(root_resolved)
+                    except (OSError, ValueError):
+                        continue  # Do not follow symlinks outside the selected folder.
+                    suffix = f.suffix.lower()
+                    if suffix == ".zip":
+                        zip_files.append(f)
+                    elif suffix in SUPPORTED:
+                        key = str(f.absolute()).casefold()
+                        if key not in seen:
+                            files.append(f); seen.add(key)
+            except OSError as exc:
+                log_error(f"Folder scan warning for {p}: {exc}")
+        elif p.suffix.lower() == ".zip":
+            zip_files.append(p)
+        elif p.suffix.lower() in SUPPORTED:
+            key = str(p.resolve()).casefold()
+            if key not in seen:
+                files.append(p); seen.add(key)
+
+    extracted_root = Path(batch_dir)
+    extracted_root.mkdir(parents=True, exist_ok=True)
+    for index, archive in enumerate(sorted(set(zip_files), key=lambda x: str(x).casefold()), 1):
+        try:
+            extracted = safe_extract_zip(archive, extracted_root / f"{archive.stem}_{index}")
+            for f in extracted:
+                key = str(f.absolute()).casefold()
+                if origin_map is not None:
+                    origin_map[str(f.absolute())] = str(archive.absolute())
+                if key not in seen:
+                    files.append(f); seen.add(key)
+        except Exception as exc:
+            log_error(f"Could not import ZIP {archive}: {type(exc).__name__}: {exc}")
+    return sorted(files, key=lambda x: (x.name.casefold(), str(x.parent).casefold()))
 
 def preserved_copy(source: Path, batch: Path) -> Path:
     # Keep source originals available even when input came from a temporary folder.
@@ -681,75 +1026,389 @@ def split_part_info(filename: str):
         if total>1 and 1<=part<=total:return (base or "invoice",part,total)
     return None
 
+def group_split_files(files):
+    """Group only complete, unambiguous split sets; never drop repeated parts."""
+    groups = {}
+    items = []
+    for file_path in files:
+        info = split_part_info(Path(file_path).name)
+        if not info:
+            items.append([Path(file_path)])
+            continue
+        base, part, total = info
+        key = (str(Path(file_path).parent).casefold(), base, total)
+        groups.setdefault(key, []).append((part, Path(file_path)))
+    for key, parts in groups.items():
+        by_part = {}
+        duplicate_part = False
+        for part, file_path in parts:
+            if part in by_part:
+                duplicate_part = True
+            else:
+                by_part[part] = file_path
+        total = key[2]
+        complete = (not duplicate_part and len(by_part) == total
+                    and all(i in by_part for i in range(1, total + 1)))
+        if complete:
+            items.append([by_part[i] for i in range(1, total + 1)])
+        else:
+            # Preserve every physical file as its own review item. The import
+            # worker adds an incomplete-set warning to each record.
+            items.extend([[file_path] for _, file_path in sorted(parts, key=lambda x: (x[0], x[1].name.casefold()))])
+    return items
+
+
+def _normal_match_text(value):
+    value = str(value or "").casefold().strip()
+    value = re.sub(r"\b(s\.?r\.?l\.?|s\.?a\.?|ltd|llc|inc|gmbh)\b", "", value)
+    return re.sub(r"[^a-z0-9ăâîșț]+", "", value)
+
+
 def duplicate_candidate(data):
-    """Return a likely duplicate record based on vendor+invoice number or vendor/date/amount."""
-    vendor=(data.get("vendor") or "").strip().casefold()
-    number=(data.get("invoice_number") or "").strip().casefold()
-    date=(data.get("invoice_date") or "").strip()
-    amount=parse_money(data.get("amount",""))
-    currency=(data.get("currency") or "RON").strip().upper()
-    if not vendor:return None
+    """Return a likely duplicate based on stable invoice identity signals."""
+    vendor = _normal_match_text(data.get("vendor"))
+    number = _normal_match_text(data.get("invoice_number"))
+    date = fmt_date(data.get("invoice_date", ""))
+    amount = parse_money(data.get("amount", ""))
+    currency = str(data.get("currency") or "").strip().upper()
+    if not vendor:
+        return None
     with db_connect() as con:
-        rows=con.execute("SELECT id,vendor,invoice_number,invoice_date,amount,currency FROM invoices WHERE vendor<>''").fetchall()
-    for r in rows:
-        rv=(r["vendor"] or "").strip().casefold()
-        rn=(r["invoice_number"] or "").strip().casefold()
-        ra=parse_money(r["amount"])
-        if number and rn and number==rn and vendor==rv:
-            return (r["id"],"same vendor and invoice number")
-        if date and date==r["invoice_date"] and amount is not None and ra is not None and abs(amount-ra)<0.005 and currency==str(r["currency"]).upper() and vendor==rv:
-            return (r["id"],"same vendor, date, amount and currency")
+        rows = con.execute("SELECT id,vendor,invoice_number,invoice_date,amount,currency FROM invoices WHERE vendor<>''").fetchall()
+    for row in rows:
+        rv = _normal_match_text(row["vendor"])
+        rn = _normal_match_text(row["invoice_number"])
+        ra = parse_money(row["amount"])
+        if number and rn and number == rn and vendor == rv:
+            return (row["id"], "same normalized supplier and invoice number")
+        row_date = fmt_date(row["invoice_date"] or "")
+        row_currency = str(row["currency"] or "").strip().upper()
+        if (date and date == row_date and amount is not None and ra is not None
+                and abs(amount-ra) < 0.005 and currency and currency == row_currency and vendor == rv):
+            return (row["id"], "same supplier, date, amount and currency")
     return None
+
 
 def audit(invoice_id, action, details=""):
     with db_connect() as con:
         con.execute("INSERT INTO audit_log(invoice_id,action,details,created_at) VALUES(?,?,?,?)",
-                    (invoice_id,action,details,datetime.now().isoformat(timespec="seconds")))
+                    (invoice_id, action, details, datetime.now().isoformat(timespec="seconds")))
 
-def insert_invoice(data: dict) -> tuple[int,bool]:
-    now=datetime.now().isoformat(timespec="seconds")
+
+def insert_invoice(data: dict) -> tuple[int, bool]:
+    now = datetime.now().isoformat(timespec="seconds")
+    payload = dict(data)
+    payload["invoice_date"] = fmt_date(payload.get("invoice_date", ""))
+    payload["currency"] = str(payload.get("currency") or "").strip().upper()
+    file_hash = str(payload.get("file_hash") or "")
     with db_connect() as con:
-        dup=con.execute("SELECT id FROM invoices WHERE file_hash=? AND file_hash<>''",(data["file_hash"],)).fetchone()
-        status=data.get("status","Needs review")
-        notes=data.get("review_notes","")
-        duplicate_of=None
-        possible=duplicate_candidate(data) if not dup else None
+        dup = con.execute("SELECT id FROM invoices WHERE file_hash=? AND file_hash<>''", (file_hash,)).fetchone() if file_hash else None
+        status = payload.get("status", "Needs review")
+        notes = payload.get("review_notes", "")
+        duplicate_of = None
+        possible = duplicate_candidate(payload) if not dup else None
         if dup:
-            duplicate_of=dup["id"]
-            status="Needs review"
-            notes=(notes+" " if notes else "")+f"Exact duplicate file of invoice record #{duplicate_of}."
+            duplicate_of = dup["id"]
+            status = "Needs review"
+            notes = (notes + " " if notes else "") + f"Exact duplicate file of invoice record #{duplicate_of}."
         elif possible:
-            duplicate_of=possible[0]
-            status="Needs review"
-            notes=(notes+" " if notes else "")+f"Possible duplicate of record #{duplicate_of} ({possible[1]}). Verify manually."
-        cur=con.execute("""INSERT INTO invoices
-          (vendor,invoice_number,invoice_date,amount,currency,status,review_notes,source_name,source_path,
+            duplicate_of = possible[0]
+            status = "Needs review"
+            notes = (notes + " " if notes else "") + f"Possible duplicate of record #{duplicate_of} ({possible[1]}). Verify manually."
+        cur = con.execute("""INSERT INTO invoices
+          (vendor,invoice_number,invoice_date,amount,currency,status,review_notes,source_name,source_path,source_input_path,
            file_hash,duplicate_of,raw_text,ocr_confidence,split_group,field_confidence_json,verified_fields_json,created_at,updated_at)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-          (data.get("vendor",""),data.get("invoice_number",""),data.get("invoice_date",""),
-           data.get("amount",""),data.get("currency","RON"),status,notes,data["source_name"],
-           data["source_path"],data["file_hash"],duplicate_of,data.get("raw_text",""),
-           data.get("ocr_confidence",0),data.get("split_group",""),
-           json.dumps(data.get("field_confidence",{}),ensure_ascii=False),
-           json.dumps(data.get("verified_fields",{}),ensure_ascii=False),now,now))
-        return cur.lastrowid, bool(dup)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+          (payload.get("vendor", ""), payload.get("invoice_number", ""), payload.get("invoice_date", ""),
+           payload.get("amount", ""), payload.get("currency", ""), status, notes, payload.get("source_name", ""),
+           payload.get("source_path", ""), payload.get("source_input_path", ""), file_hash, duplicate_of, payload.get("raw_text", ""),
+           payload.get("ocr_confidence", 0), payload.get("split_group", ""),
+           json.dumps(payload.get("field_confidence", {}), ensure_ascii=False),
+           json.dumps(payload.get("verified_fields", {}), ensure_ascii=False), now, now))
+        return cur.lastrowid, bool(duplicate_of)
+
 
 def update_invoice(i, values, verified_fields=None):
+    """Persist review values and invalidate checks for every changed field."""
+    keys = ["vendor", "invoice_number", "invoice_date", "amount", "currency", "status", "review_notes"]
+    values = list(values)
+    if len(values) < len(keys):
+        values += [""] * (len(keys) - len(values))
+    raw_date = str(values[2] or "").strip()
+    values[2] = fmt_date(raw_date) if raw_date else ""
+    if raw_date and not values[2]:
+        raise ValueError("Enter a valid invoice date in DD/MM/YYYY format or a supported ISO date.")
+    raw_amount = str(values[3] or "").strip()
+    if raw_amount and parse_money(raw_amount) is None:
+        raise ValueError("Enter a valid numeric invoice amount.")
+    values[4] = str(values[4] or "").strip().upper()
+    if values[4] and not re.fullmatch(r"[A-Z]{3,5}", values[4]):
+        raise ValueError("Currency must be a three-to-five-letter code, such as RON or EUR.")
+    if values[5] not in {"Needs review", "Confirmed"}:
+        raise ValueError("Invoice status must be Needs review or Confirmed.")
+    now = datetime.now().isoformat(timespec="seconds")
+    warning_reasons = []
+    changed_fields = []
     with db_connect() as con:
-        if verified_fields is None:
-            con.execute("""UPDATE invoices SET vendor=?,invoice_number=?,invoice_date=?,amount=?,currency=?,
-              status=?,review_notes=?,updated_at=? WHERE id=?""",
-              (*values,datetime.now().isoformat(timespec="seconds"),i))
-        else:
-            con.execute("""UPDATE invoices SET vendor=?,invoice_number=?,invoice_date=?,amount=?,currency=?,
-              status=?,review_notes=?,verified_fields_json=?,updated_at=? WHERE id=?""",
-              (*values,json.dumps(verified_fields,ensure_ascii=False),datetime.now().isoformat(timespec="seconds"),i))
-    audit(i,"reviewed",f"status={values[5]}")
+        old = con.execute("SELECT * FROM invoices WHERE id=?", (int(i),)).fetchone()
+        if old is None:
+            raise ValueError("This invoice record no longer exists. Refresh the register and try again.")
+        checks = dict(verified_fields or {})
+        for field, value in zip(keys[:5], values[:5]):
+            old_value = str(old[field] or "").strip()
+            new_value = str(value or "").strip()
+            if field == "invoice_date":
+                old_value = fmt_date(old_value) or old_value
+                new_value = fmt_date(new_value) or new_value
+            if field in {"vendor", "invoice_number", "currency"}:
+                old_value = old_value.casefold()
+                new_value = new_value.casefold()
+            if old_value != new_value:
+                checks[field] = False
+                changed_fields.append(field)
+
+        if values[5] == "Confirmed":
+            if old["duplicate_of"]:
+                warning_reasons.append(f"Possible duplicate of invoice #{old['duplicate_of']}; clear the warning first.")
+            missing_values = [field for field, value in zip(keys[:5], values[:5])
+                              if not str(value or "").strip()]
+            if missing_values:
+                warning_reasons.append("Missing required values: " + ", ".join(missing_values))
+            required_checks = [field for field in keys[:5] if not bool(checks.get(field))]
+            if required_checks:
+                warning_reasons.append("Fields not currently verified: " + ", ".join(required_checks))
+            if warning_reasons:
+                values[5] = "Needs review"
+                warning_note = "Confirmation blocked. " + " ".join(warning_reasons)
+                values[6] = ((str(values[6]).strip() + " ") if str(values[6]).strip() else "") + warning_note
+        con.execute("""UPDATE invoices SET vendor=?,invoice_number=?,invoice_date=?,amount=?,currency=?,
+          status=?,review_notes=?,verified_fields_json=?,updated_at=? WHERE id=?""",
+          (*values, json.dumps(checks, ensure_ascii=False), now, int(i)))
+    audit(i, "reviewed", f"status={values[5]}; changed_fields={','.join(changed_fields)}")
+    return {"verified_fields": checks, "status": values[5], "warning": " ".join(warning_reasons),
+            "changed_fields": changed_fields}
+
+def resolve_duplicate(i):
+    """Clear a duplicate flag only after an explicit human decision."""
+    with db_connect() as con:
+        row = con.execute("SELECT duplicate_of,review_notes FROM invoices WHERE id=?", (int(i),)).fetchone()
+        if row is None:
+            raise ValueError("Invoice record not found.")
+        if not row["duplicate_of"]:
+            return False
+        notes = re.sub(r"(?:Exact duplicate file|Possible duplicate) of invoice record #\d+\.|Possible duplicate of record #\d+ \([^)]*\)\. Verify manually\.?", "", row["review_notes"] or "", flags=re.I)
+        notes = (notes + " Manually reviewed: duplicate warning cleared.").strip()
+        con.execute("UPDATE invoices SET duplicate_of=NULL,status='Needs review',review_notes=?,verified_fields_json='{}',updated_at=? WHERE id=?",
+                    (notes, datetime.now().isoformat(timespec="seconds"), int(i)))
+    audit(i, "duplicate_cleared", "User explicitly marked this record as not a duplicate")
+    return True
+
+
+def delete_invoices(invoice_ids, delete_originals=True):
+    """Delete records and unshared file copies, optionally including input originals.
+
+    ``source_path`` is the preserved app copy and is eligible only inside
+    InvoiceFlow's Originals directory. ``source_input_path`` tracks direct
+    source PDFs/images chosen by the user. Those originals are removed only
+    when ``delete_originals`` is True. Shared files and symlink targets are
+    always protected. Older records and ZIP imports may not track an original.
+    """
+    ids = sorted({int(value) for value in (invoice_ids or [])})
+    empty_result = {
+        "deleted_records": 0, "deleted_files": 0, "deleted_managed_copies": 0,
+        "deleted_original_files": 0, "preserved_original_files": 0,
+        "retained_shared_files": 0, "missing_files": 0,
+        "untracked_originals": 0, "skipped_symlinks": 0,
+        "cleanup_errors": [],
+    }
+    if not ids:
+        return empty_result
+
+    originals_root = ORIGINALS.resolve()
+    selected_candidates = set()
+    remaining_references = set()
+    found_rows = {}
+    skipped_symlinks = set()
+    now = datetime.now().isoformat(timespec="seconds")
+
+    def normalized_reference(raw_path):
+        raw_path = str(raw_path or "").strip()
+        if not raw_path:
+            return None, False
+        raw_candidate = Path(raw_path).expanduser()
+        try:
+            # Never delete through a symlink in the file or any parent path.
+            # It may point to a user file outside the imported folder.
+            if any(part.is_symlink() for part in (raw_candidate, *raw_candidate.parents)):
+                return None, True
+            return raw_candidate.resolve(strict=False), False
+        except (OSError, RuntimeError, ValueError):
+            return None, False
+
+    with db_connect() as con:
+        rows = con.execute("SELECT id,source_path,source_input_path FROM invoices").fetchall()
+        target_ids = set(ids)
+        for row in rows:
+            invoice_id = int(row["id"])
+            found_rows[invoice_id] = row
+            is_selected = invoice_id in target_ids
+            for raw in str(row["source_path"] or "").splitlines():
+                candidate, is_link = normalized_reference(raw)
+                if is_link:
+                    skipped_symlinks.add(str(raw).strip())
+                if candidate is not None:
+                    if is_selected and candidate.is_relative_to(originals_root):
+                        selected_candidates.add((candidate, "managed"))
+                    elif not is_selected:
+                        remaining_references.add(candidate)
+            for raw in str(row["source_input_path"] or "").splitlines():
+                candidate, is_link = normalized_reference(raw)
+                if is_link:
+                    skipped_symlinks.add(str(raw).strip())
+                if candidate is not None:
+                    if is_selected:
+                        if delete_originals:
+                            selected_candidates.add((candidate, "original"))
+                    else:
+                        remaining_references.add(candidate)
+
+        found_ids = set(found_rows).intersection(target_ids)
+        if not found_ids:
+            raise ValueError("No selected invoice records were found. Refresh the register and try again.")
+
+        for invoice_id in sorted(found_ids):
+            con.execute(
+                "INSERT INTO audit_log(invoice_id,action,details,created_at) VALUES(?,?,?,?)",
+                (invoice_id, "deleted", f"record deleted; original_inputs_removed={str(bool(delete_originals)).lower()}; unshared linked files cleaned", now),
+            )
+        placeholders = ",".join("?" for _ in found_ids)
+        con.execute(f"DELETE FROM invoices WHERE id IN ({placeholders})", tuple(sorted(found_ids)))
+
+    candidates_by_path = {}
+    retained_shared = 0
+    for path, kind in selected_candidates:
+        if path in remaining_references:
+            retained_shared += 1
+            continue
+        allowed_suffixes = SUPPORTED | ({".zip"} if kind == "original" else set())
+        if path.suffix.lower() not in allowed_suffixes:
+            continue
+        # Keep the more informative kind if source_path and source_input_path
+        # happen to point to the same underlying file.
+        previous = candidates_by_path.get(path)
+        if previous != "original":
+            candidates_by_path[path] = kind
+
+    untracked_originals = (sum(
+        1 for invoice_id in found_ids
+        if not str(found_rows[invoice_id]["source_input_path"] or "").strip()
+    ) if delete_originals else 0)
+    preserved_original_files = (0 if delete_originals else len({
+        candidate for invoice_id in found_ids
+        for raw in str(found_rows[invoice_id]["source_input_path"] or "").splitlines()
+        for candidate, is_link in [normalized_reference(raw)]
+        if candidate is not None and not is_link
+    }))
+    deleted_files = deleted_managed = deleted_originals = missing_files = 0
+    cleanup_errors = []
+    for path, kind in sorted(candidates_by_path.items(), key=lambda item: len(item[0].parts), reverse=True):
+        try:
+            if path.is_symlink():
+                skipped_symlinks.add(str(path))
+                continue
+            if path.is_file():
+                path.unlink()
+                deleted_files += 1
+                if kind == "managed":
+                    deleted_managed += 1
+                else:
+                    deleted_originals += 1
+            else:
+                missing_files += 1
+        except OSError as exc:
+            cleanup_errors.append(f"{path.name}: {exc}")
+            log_error(f"Could not remove deleted invoice source {path}: {exc}")
+
+    # Remove empty app-managed import directories, never Originals root.
+    parents = {parent for path in candidates_by_path for parent in path.parents
+               if path.is_relative_to(originals_root)}
+    for folder in sorted(parents, key=lambda item: len(item.parts), reverse=True):
+        if folder == originals_root:
+            continue
+        try:
+            folder.relative_to(originals_root)
+            folder.rmdir()
+        except (ValueError, OSError):
+            pass
+
+    return {
+        "deleted_records": len(found_ids), "deleted_files": deleted_files,
+        "deleted_managed_copies": deleted_managed, "deleted_original_files": deleted_originals,
+        "preserved_original_files": preserved_original_files,
+        "retained_shared_files": retained_shared, "missing_files": missing_files,
+        "untracked_originals": untracked_originals, "skipped_symlinks": len(skipped_symlinks),
+        "cleanup_errors": cleanup_errors,
+    }
+
 
 def delete_invoice(i):
-    audit(i,"deleted","record deleted by user")
-    with db_connect() as con:
-        con.execute("DELETE FROM invoices WHERE id=?",(i,))
+    """Backward-compatible single-record deletion."""
+    return delete_invoices([i])
+
+
+def create_backup(destination: Path) -> Path:
+    """Create a consistent SQLite backup plus originals and app diagnostics."""
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=False)
+    backup_db = destination / "invoices.sqlite3"
+    with db_connect() as source, sqlite3.connect(backup_db) as target:
+        source.backup(target)
+        integrity = target.execute("PRAGMA integrity_check").fetchone()[0]
+        if integrity != "ok":
+            raise RuntimeError(f"Backup integrity check failed: {integrity}")
+    if ORIGINALS.exists():
+        shutil.copytree(ORIGINALS, destination / "Originals", dirs_exist_ok=True)
+    if LOG.exists():
+        shutil.copy2(LOG, destination / LOG.name)
+    readme = destination / "BACKUP_INFO.txt"
+    readme.write_text(
+        "InvoiceFlow local backup\n"
+        f"Created: {datetime.now().isoformat(timespec='seconds')}\n"
+        "Contains a consistent SQLite database snapshot and preserved original documents.\n"
+        "Keep this folder private; it may contain confidential financial information.\n",
+        encoding="utf-8")
+    return destination
+
+def restore_backup(backup_directory: Path) -> Path:
+    """Restore a validated InvoiceFlow backup after preserving current data."""
+    backup_directory = Path(backup_directory).expanduser().resolve()
+    backup_db = backup_directory / "invoices.sqlite3"
+    if not backup_directory.is_dir() or not backup_db.is_file():
+        raise ValueError("Select an InvoiceFlow backup folder containing invoices.sqlite3.")
+    # Validate completely before touching the active database.
+    with sqlite3.connect(backup_db) as check:
+        integrity = check.execute("PRAGMA integrity_check").fetchone()[0]
+        tables = {r[0] for r in check.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if integrity != "ok" or "invoices" not in tables:
+            raise ValueError("The selected backup is damaged or is not an InvoiceFlow database.")
+    backup_root = BASE / "Backups"
+    backup_root.mkdir(parents=True, exist_ok=True)
+    safety_snapshot = backup_root / f"BeforeRestore_{datetime.now():%Y%m%d_%H%M%S_%f}"
+    create_backup(safety_snapshot)
+    # Use SQLite's online backup API; do not replace a live WAL database file.
+    with sqlite3.connect(backup_db) as source, db_connect() as target:
+        source.backup(target)
+        if target.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise RuntimeError("Restored database integrity check failed.")
+    # Merge preserved originals without deleting newer local files. Extra files
+    # are harmless; missing files remain visible as a review warning.
+    source_originals = backup_directory / "Originals"
+    if source_originals.is_dir():
+        shutil.copytree(source_originals, ORIGINALS, dirs_exist_ok=True)
+    init_db()
+    audit(None, "backup_restored", f"source={backup_directory}; safety_snapshot={safety_snapshot}")
+    return safety_snapshot
+
 
 def export_xlsx(path: Path):
     from openpyxl import Workbook
@@ -762,8 +1421,9 @@ def export_xlsx(path: Path):
     def fill_sheet(sh, data):
         sh.append(headers)
         for r in data:
+            display_status = "Possible duplicate" if r.get("duplicate_of") else r["status"]
             sh.append([r["invoice_date"],r["vendor"],r["invoice_number"],parse_money(r["amount"]) if parse_money(r["amount"]) is not None else r["amount"],
-                       r["currency"],r["status"],r["source_name"],r["review_notes"]])
+                       r["currency"],display_status,r["source_name"],r["review_notes"]])
         sh.freeze_panes="A2"; sh.auto_filter.ref=sh.dimensions
         for c in sh[1]:
             c.font=Font(bold=True,color="FFFFFF")
@@ -776,7 +1436,7 @@ def export_xlsx(path: Path):
     months={}
     for r in rows:
         try:
-            d=datetime.strptime(r["invoice_date"],"%d/%m/%Y")
+            d=datetime.strptime(fmt_date(r["invoice_date"]),"%d/%m/%Y")
             months.setdefault(d.strftime("%Y-%m"),[]).append(r)
         except ValueError: pass
     for key,vals in sorted(months.items()):
@@ -784,7 +1444,7 @@ def export_xlsx(path: Path):
         fill_sheet(sh,vals)
         sums={}
         for r in vals:
-            if r["status"]!="Confirmed": continue
+            if r["status"]!="Confirmed" or r.get("duplicate_of") or not str(r.get("currency") or "").strip(): continue
             n=parse_money(r["amount"])
             if n is not None: sums[r["currency"]]=sums.get(r["currency"],0)+n
         sh.append([]); sh.append(["Monthly totals by currency"])
@@ -803,14 +1463,14 @@ def export_xlsx(path: Path):
     sums={}
     dates=[]
     for r in rows:
-        if r["status"]!="Confirmed": continue
+        if r["status"]!="Confirmed" or r.get("duplicate_of") or not str(r.get("currency") or "").strip(): continue
         n=parse_money(r["amount"])
         if n is not None: sums[r["currency"]]=sums.get(r["currency"],0)+n
         try: dates.append(datetime.strptime(r["invoice_date"],"%d/%m/%Y"))
         except ValueError: pass
     ws.append([]); ws.append(["Confirmed purchase totals by currency"])
     for cur,total in sorted(sums.items()): ws.append([cur,round(total,2)])
-    ws.append(["Note", "Only Confirmed records are included. Duplicate flags are advisory; verify and confirm only one copy if appropriate."])
+    ws.append(["Note", "Only Confirmed, non-duplicate records with a known currency are included in totals. Resolve duplicate warnings before confirmation; unknown-currency amounts are excluded from sums."])
     ws.append([])
     ws.append(["Purchase period"])
     if dates:
@@ -1027,7 +1687,7 @@ class App(tk.Tk):
             self.tree.insert("","end",iid=str(r["id"]),tags=tags,values=(r["invoice_date"],r["vendor"],r["invoice_number"],r["amount"],r["currency"],r["status"],f"{(r['ocr_confidence'] or 0):.0%}",r["source_name"],r["review_notes"]))
         sums={}
         for r in rows:
-            if r["status"]=="Confirmed":
+            if r["status"]=="Confirmed" and not r.get("duplicate_of"):
                 n=parse_money(r["amount"])
                 if n is not None: sums[r["currency"]]=sums.get(r["currency"],0)+n
         if hasattr(self,"card_total"):
@@ -1172,7 +1832,7 @@ class App(tk.Tk):
                     notes=(notes+" " if notes else "")+fields.notes
                 conf=sum(confidences)/len(confidences) if confidences else 0
                 with db_connect() as con:
-                    con.execute("""UPDATE invoices SET vendor=?,invoice_number=?,invoice_date=?,amount=?,currency=?,raw_text=?,ocr_confidence=?,review_notes=?,updated_at=? WHERE id=?""",
+                    con.execute("""UPDATE invoices SET vendor=?,invoice_number=?,invoice_date=?,amount=?,currency=?,raw_text=?,ocr_confidence=?,review_notes=?,status='Needs review',verified_fields_json='{}',updated_at=? WHERE id=?""",
                         (vals["vendor"],vals["invoice_number"],vals["invoice_date"],vals["amount"],vals["currency"],raw,conf,notes,datetime.now().isoformat(timespec="seconds"),row["id"]))
                 audit(row["id"],"ocr_rescan",f"sources={len(paths)}; text_conf={conf:.2f}")
                 updated+=1
@@ -1200,11 +1860,13 @@ class App(tk.Tk):
             return
         primary=chosen[0]
         all_paths=[]
+        all_input_paths=[]
         all_names=[]
         all_text=[]
         for r in chosen:
             all_names.extend([x for x in (r.get("source_name") or "").split(" + ") if x])
             all_paths.extend([x for x in (r.get("source_path") or "").splitlines() if x])
+            all_input_paths.extend([x for x in (r.get("source_input_path") or "").splitlines() if x])
             if r.get("raw_text"): all_text.append(r["raw_text"])
         merged_text="\n\n===== MERGED RECORD =====\n\n".join(all_text)
         fields=extract_fields(merged_text," + ".join(all_names))
@@ -1213,16 +1875,16 @@ class App(tk.Tk):
         number=primary.get("invoice_number") or fields.invoice_number
         date=primary.get("invoice_date") or fields.invoice_date
         amount=primary.get("amount") or fields.amount
-        currency=primary.get("currency") or fields.currency or "RON"
+        currency=primary.get("currency") or fields.currency or ""
         notes=(primary.get("review_notes") or "").strip()
         merge_note=f"Manually merged {len(chosen)} selected records. Verify invoice pages and extracted fields."
         notes=(notes+" " if notes else "")+merge_note
         with db_connect() as con:
             con.execute("""UPDATE invoices SET vendor=?,invoice_number=?,invoice_date=?,amount=?,currency=?,
-                source_name=?,source_path=?,raw_text=?,review_notes=?,split_group=?,status='Needs review',
-                updated_at=? WHERE id=?""",
+                source_name=?,source_path=?,source_input_path=?,raw_text=?,review_notes=?,split_group=?,status='Needs review',
+                verified_fields_json='{}',updated_at=? WHERE id=?""",
                 (vendor,number,date,amount,currency," + ".join(all_names),"\n".join(dict.fromkeys(all_paths)),
-                 merged_text,notes,"manual_merge",datetime.now().isoformat(timespec="seconds"),primary["id"]))
+                 "\n".join(dict.fromkeys(all_input_paths)),merged_text,notes,"manual_merge",datetime.now().isoformat(timespec="seconds"),primary["id"]))
             for r in chosen[1:]:
                 con.execute("DELETE FROM invoices WHERE id=?",(r["id"],))
         audit(primary["id"],"manual_merge",f"merged records={ids}")
@@ -1253,12 +1915,12 @@ class App(tk.Tk):
         ids=self.selected_ids()
         if not ids:return
         n=len(ids)
-        msg=(f"Delete {n} selected invoice records?" if n>1 else "Delete this invoice record?")
-        msg+=" The saved original file(s) will not be deleted."
-        if messagebox.askyesno("Delete records",msg):
-            for i in ids: delete_invoice(i)
+        msg=(f"Permanently delete {n} selected invoice records and their linked PDF/image/ZIP source files?" if n>1 else "Permanently delete this invoice record and its linked PDF/image/ZIP source files?")
+        msg+=" This includes stored InvoiceFlow copies and original import files recorded by this version. Files still used by another invoice are kept. Files imported by older versions may not have a separately tracked original path. A ZIP archive shared by other invoices is kept until its last linked invoice is deleted."
+        if messagebox.askyesno("Delete records and source files",msg):
+            result=delete_invoices(ids)
             self.refresh()
-            self.status.config(text=f"Deleted {n} record(s)")
+            self.status.config(text=f"Deleted {result['deleted_records']} record(s) and {result['deleted_files']} linked file(s)")
     def import_files(self):
         paths=filedialog.askopenfilenames(title="Select invoices and/or ZIP archives",
           filetypes=[("Invoice files","*.pdf *.zip *.png *.jpg *.jpeg *.tif *.tiff *.bmp"),("All files","*.*")])
@@ -1273,7 +1935,8 @@ class App(tk.Tk):
             messagebox.showerror("OCR engine not installed","Install Tesseract OCR with Romanian and English language packs. See the included setup guide."); return
         batch=ORIGINALS/datetime.now().strftime("Batch_%Y%m%d_%H%M%S_%f")
         batch.mkdir(parents=True,exist_ok=True)
-        try: files=collect_inputs(paths,batch/"zip_extracted")
+        zip_sources={}
+        try: files=collect_inputs(paths,batch/"zip_extracted",origin_map=zip_sources)
         except Exception as e:
             log_error(f"Import collection failed: {e}"); messagebox.showerror("Import failed",str(e)); return
         if not files:
@@ -1282,8 +1945,9 @@ class App(tk.Tk):
         self.import_progress.configure(maximum=max(1,len(files)),value=0)
         self.progress_label.config(text=f"0 / {len(files)} invoices")
         self.status.config(text="Preparing OCR…")
-        threading.Thread(target=self.import_worker,args=(files,batch,tesseract),daemon=True).start()
-    def import_worker(self,files,batch,tesseract):
+        threading.Thread(target=self.import_worker,args=(files,batch,tesseract,zip_sources),daemon=True).start()
+    def import_worker(self,files,batch,tesseract,zip_sources=None):
+        zip_sources=zip_sources or {}
         added=duplicates=failed=0
         # Group split pages before OCR so "part 1 of 2" + "part 2 of 2"
         # becomes ONE invoice record, not two records.
@@ -1318,8 +1982,15 @@ class App(tk.Tk):
                        self.status.config(text=f"Invoice {n}/{total} • {names[:70]} • starting…"))
             try:
                 saved_parts=[]
+                input_paths=[]
                 for f in parts:
-                    saved=f if ORIGINALS in f.parents else preserved_copy(f,batch)
+                    is_managed = ORIGINALS.resolve() in f.resolve().parents
+                    archive_source=zip_sources.get(str(f.absolute()))
+                    if archive_source:
+                        input_paths.append(archive_source)
+                    elif not is_managed:
+                        input_paths.append(str(f.absolute()))
+                    saved=f if is_managed else preserved_copy(f,batch)
                     saved_parts.append(saved)
                 raw_parts=[]; conf_parts=[]
                 for saved in saved_parts:
@@ -1350,6 +2021,7 @@ class App(tk.Tk):
                     "vendor":fields.vendor,"invoice_number":fields.invoice_number,"invoice_date":fields.invoice_date,
                     "amount":fields.amount,"currency":fields.currency or "","status":"Needs review","review_notes":notes,
                     "source_name":display_name,"source_path":"\n".join(str(p) for p in saved_parts),
+                    "source_input_path":"\n".join(dict.fromkeys(input_paths)),
                     "file_hash":digest,"raw_text":raw,"ocr_confidence":conf,"split_group":group_key
                 })
                 added+=1
@@ -1359,8 +2031,12 @@ class App(tk.Tk):
                 failed+=1; log_error(f"OCR failed for {[str(x) for x in parts]}: {type(e).__name__}: {e}")
                 for f in parts:
                     try:
-                        saved=f if ORIGINALS in f.parents else preserved_copy(f,batch)
-                        insert_invoice({"source_name":saved.name,"source_path":str(saved),"file_hash":sha256_file(saved),
+                        is_managed = ORIGINALS.resolve() in f.resolve().parents
+                        saved=f if is_managed else preserved_copy(f,batch)
+                        archive_source=zip_sources.get(str(f.absolute()))
+                        input_source=archive_source or ("" if is_managed else str(f.absolute()))
+                        insert_invoice({"source_name":saved.name,"source_path":str(saved),
+                          "source_input_path":input_source,"file_hash":sha256_file(saved),
                           "status":"Needs review","review_notes":f"OCR failed: {type(e).__name__}: {e}"})
                     except Exception as e2: log_error(f"Could not save failed import record: {e2}")
             self.after(0, lambda n=n, total=total_items:

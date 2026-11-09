@@ -3,7 +3,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 title Build InvoiceFlow Windows Installer
 echo ============================================================
-echo InvoiceFlow 4.5.0 - Windows installer build
+echo InvoiceFlow 5.1.0 - Windows installer build
 echo ============================================================
 echo This build must run on Windows x64.
 echo.
@@ -58,6 +58,9 @@ if not exist "%TESSDIR%" mkdir "%TESSDIR%"
 echo [1/6] Downloading Tesseract Windows x64 installer from GitHub Releases...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri 'https://github.com/tesseract-ocr/tesseract/releases/download/5.5.3/tesseract-ocr-w64-setup-5.5.3.20260724.exe' -OutFile '.build\tesseract-ocr-setup.exe'"
 if errorlevel 1 goto :failed
+REM Verify the pinned OCR installer before it is embedded or executed by setup.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$expected='BEE9E3434BD94FD65387D9BE28CD467A41F61B1275383B55B0F59A1331270AE4'; $actual=(Get-FileHash '.build\tesseract-ocr-setup.exe' -Algorithm SHA256).Hash; if ($actual -ne $expected) { throw 'Tesseract installer SHA-256 mismatch.' }"
+if errorlevel 1 goto :failed
 
 echo [2/6] Downloading Romanian and English OCR language data...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/ron.traineddata' -OutFile '.build\tessdata\ron.traineddata'; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata' -OutFile '.build\tessdata\eng.traineddata'"
@@ -89,7 +92,7 @@ echo [6/6] Compiling the Windows setup wizard...
 if errorlevel 1 goto :failed
 
 echo.
-echo SUCCESS. Installer output is in installer-output\InvoiceFlow_Setup_4.5.0.exe
+echo SUCCESS. Installer output is in installer-output\InvoiceFlow_Setup_5.1.0.exe
 echo You can now test it on a Windows 11 x64 PC.
 pause
 exit /b 0

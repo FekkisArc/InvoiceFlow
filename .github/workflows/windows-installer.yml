@@ -3,6 +3,8 @@ name: Build and publish InvoiceFlow Windows installer
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
 
@@ -21,6 +23,29 @@ jobs:
         with:
           python-version: '3.15'
           architecture: 'x64'
+
+      - name: Set up Node.js for interface checks
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt pytest
+
+      - name: Validate Python source
+        run: python -m py_compile main.py web_app.py workspace_features.py
+
+      - name: Run regression suite
+        run: python -m pytest -q
+
+      - name: Validate web interface JavaScript
+        shell: pwsh
+        run: |
+          $html = Get-Content webui.html -Raw
+          $match = [regex]::Match($html, '(?s)<script>(.*?)</script>')
+          if (-not $match.Success) { throw 'Inline application script was not found.' }
+          Set-Content -Path "$env:TEMP\invoiceflow-inline.js" -Value $match.Groups[1].Value -Encoding utf8
+          node --check "$env:TEMP\invoiceflow-inline.js"
 
       - name: Install Inno Setup 6
         run: choco install innosetup --no-progress -y

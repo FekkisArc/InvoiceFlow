@@ -1,29 +1,49 @@
-# Local build outputs
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+
+# Build and packaging
 .build/
 build/
 dist/
 installer-output/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.venv/
-venv/
-.env
-*.log
+*.spec
+
+# Local app data and private financial material
+*.db
 *.sqlite
 *.sqlite3
-*.db
-# User data and private financial documents
-Invoices/
-Originals/
-Exports/
-backups/
+*.sqlite3-wal
+*.sqlite3-shm
+*.log
+*.xlsx
+*.xls
+*.csv
 *.pdf
+*.zip
+*.7z
+*.rar
 *.png
 *.jpg
 *.jpeg
 *.tif
 *.tiff
 *.bmp
-*.xlsx
-*.xls
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+Originals/
+Exports/
+Backups/
+install_log.txt
+*.tmp
+*.bak
