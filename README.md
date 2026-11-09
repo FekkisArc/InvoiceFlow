@@ -1,8 +1,8 @@
-# InvoiceFlow 5.1.0 — Professional local invoice workspace
+# InvoiceFlow 5.1.1 — Professional local invoice workspace
 
 InvoiceFlow is a Windows 11 x64 desktop application for importing invoices and receipts, extracting their key fields with OCR, checking every result against the original documents, and exporting a local Excel tracker. It is designed for Romanian and English documents and keeps invoice content on the user's computer.
 
-## What's new in 5.1.0
+## What's new in 5.1.1
 
 ### Reliable data and accounting safeguards
 - Database migrations run before indexes are created, with legacy-column migration and a schema version.
@@ -40,7 +40,7 @@ InvoiceFlow is a Windows 11 x64 desktop application for importing invoices and r
 
 ## Install the Windows application
 
-The intended end-user distribution is the Windows installer (`InvoiceFlow_Setup_5.1.0.exe`). It packages Python and application dependencies, installs the Tesseract OCR engine and Romanian/English language data, and creates the Windows shortcuts. End users do not need to install Python separately.
+The intended end-user distribution is the Windows installer (`InvoiceFlow_Setup_5.1.1.exe`). It packages Python and application dependencies, installs the Tesseract OCR engine and Romanian/English language data, and creates the Windows shortcuts. End users do not need to install Python separately.
 
 The installer is built by GitHub Actions on Windows. A source archive alone is not the installer. Before distributing a new build, test the generated setup on a clean Windows 11 x64 machine.
 

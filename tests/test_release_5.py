@@ -50,6 +50,13 @@ class IsolatedDatabase(unittest.TestCase):
         with self.assertRaises(sqlite3.ProgrammingError):
             saved_connection.execute("SELECT 1")
 
+    def test_database_context_closes_connection_after_transaction(self):
+        with core.db_connect() as con:
+            retained = con
+            con.execute("SELECT 1")
+        with self.assertRaises(sqlite3.ProgrammingError):
+            retained.execute("SELECT 1")
+
     def test_legacy_database_migrates_before_indexes(self):
         # Simulate an early MVP schema with filename/notes and no file_hash.
         with core._managed_sqlite_connection(core.DB) as con:
@@ -217,10 +224,13 @@ class IsolatedDatabase(unittest.TestCase):
         core.export_xlsx(path)
         from openpyxl import load_workbook
         wb = load_workbook(path, data_only=True)
-        monthly = wb["November 2026"]
-        summary_rows = [[c.value for c in row] for row in monthly.iter_rows()]
-        self.assertTrue(any(len(row) >= 2 and row[0] == "RON" and row[1] == 250 for row in summary_rows))
-        self.assertFalse(any(len(row) >= 2 and row[0] == "RON" and row[1] == 500 for row in summary_rows))
+        try:
+            monthly = wb["November 2026"]
+            summary_rows = [[c.value for c in row] for row in monthly.iter_rows()]
+            self.assertTrue(any(len(row) >= 2 and row[0] == "RON" and row[1] == 250 for row in summary_rows))
+            self.assertFalse(any(len(row) >= 2 and row[0] == "RON" and row[1] == 500 for row in summary_rows))
+        finally:
+            wb.close()
 
     def test_backup_uses_consistent_database_and_includes_originals(self):
         invoice_id, _ = self.add(file_hash="backup-hash")

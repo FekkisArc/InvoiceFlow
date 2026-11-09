@@ -13,7 +13,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 APP_NAME = "Invoice OCR"
-APP_VERSION = "5.1.0"
+APP_VERSION = "5.1.1"
 SUPPORTED = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".xml"}
 BASE = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "InvoiceOCR"
 DB = BASE / "invoices.sqlite3"

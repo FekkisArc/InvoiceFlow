@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_release_version_is_consistent_across_app_installer_and_metadata():
-    expected = "5.1.0"
+    expected = "5.1.1"
     assert f'APP_VERSION = "{expected}"' in (ROOT / "main.py").read_text(encoding="utf-8")
     assert f'APP_VERSION = "{expected}"' in (ROOT / "web_app.py").read_text(encoding="utf-8")
     assert f"InvoiceFlow {expected}" in (ROOT / "VERSION.txt").read_text(encoding="utf-8")
@@ -83,3 +83,18 @@ def test_web_import_tracks_external_original_input_paths():
     source = (ROOT / "web_app.py").read_text(encoding="utf-8")
     assert "input_paths=[]" in source
     assert '"source_input_path":"\\n".join(dict.fromkeys(input_paths))' in source
+
+
+def test_startup_failures_are_logged_and_shown():
+    source = (ROOT / "web_app.py").read_text(encoding="utf-8")
+    assert "def _report_fatal_startup_error" in source
+    assert "FATAL STARTUP ERROR" in source
+    assert "InvoiceFlow could not start" in source
+    assert "app.log" in source
+
+
+def test_app_database_connections_use_explicit_close_context_manager():
+    source = (ROOT / "main.py").read_text(encoding="utf-8")
+    assert "def _managed_sqlite_connection" in source
+    assert "finally:\n        connection.close()" in source
+    assert "with db_connect() as source, _managed_sqlite_connection(backup_db) as target" in source

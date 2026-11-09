@@ -154,8 +154,11 @@ class WorkspaceCase(unittest.TestCase):
         features.export_workspace_xlsx(output)
         from openpyxl import load_workbook
         wb = load_workbook(output, read_only=True)
-        self.assertTrue({"Executive Summary", "General Tracker", "Supplier Analysis", "Category Analysis", "Monthly Trends", "Budget vs Actual", "Needs Review"}.issubset(set(wb.sheetnames)))
-        self.assertEqual(wb["Budget vs Actual"].cell(2, 5).value, 250.0)
+        try:
+            self.assertTrue({"Executive Summary", "General Tracker", "Supplier Analysis", "Category Analysis", "Monthly Trends", "Budget vs Actual", "Needs Review"}.issubset(set(wb.sheetnames)))
+            self.assertEqual(wb["Budget vs Actual"].cell(2, 5).value, 250.0)
+        finally:
+            wb.close()
 
     def test_csv_export_uses_semicolon_and_includes_metadata(self):
         self.add_invoice(category="Office & administration", project="HQ", due_date="20/11/2026", vat_amount="47.50")
@@ -191,7 +194,9 @@ class WorkspaceCase(unittest.TestCase):
         self.assertEqual(result["moved_files"], 3)  # two managed copies + one shared external original
         items = features.recycle_bin_list()
         features.permanently_delete_recycled([items[0]["id"]])
-        self.assertTrue(any(Path(v["recycled"]).exists() for v in __import__('json').loads(__import__('sqlite3').connect(core.DB).execute("SELECT moved_files_json FROM recycle_bin LIMIT 1").fetchone()[0]).values()))
+        with core.db_connect() as con:
+            moved_json = con.execute("SELECT moved_files_json FROM recycle_bin LIMIT 1").fetchone()[0]
+        self.assertTrue(any(Path(v["recycled"]).exists() for v in __import__('json').loads(moved_json).values()))
         remaining = features.recycle_bin_list()[0]
         features.restore_recycled(remaining["id"])
         self.assertTrue(original.exists())
@@ -216,7 +221,9 @@ class WorkspaceCase(unittest.TestCase):
         self.assertEqual(features.scan_watched_folders(), [])
         import os, time
         old = time.time() - 10; os.utime(document, (old, old))
-        self.assertEqual([str(p).casefold() for p in features.scan_watched_folders()], [str(document).casefold()])
+        discovered = features.scan_watched_folders()
+        self.assertEqual(len(discovered), 1)
+        self.assertTrue(os.path.samefile(discovered[0], document))
 
     def test_due_date_dashboard_counts_unpaid_past_due_invoices(self):
         self.add_invoice(due_date="01/01/2020", payment_status="Unpaid")
@@ -273,7 +280,10 @@ class WorkspaceCase(unittest.TestCase):
         features.export_workspace_xlsx(output, template["config"])
         from openpyxl import load_workbook
         wb = load_workbook(output, read_only=True)
-        self.assertEqual([c.value for c in wb["General Tracker"][1]], ["Invoice date", "Supplier", "Total payable", "Currency"])
+        try:
+            self.assertEqual([c.value for c in wb["General Tracker"][1]], ["Invoice date", "Supplier", "Total payable", "Currency"])
+        finally:
+            wb.close()
         self.assertTrue(features.delete_export_template(template_id))
         self.assertEqual(features.export_templates(), [])
 

@@ -1,5 +1,5 @@
 #define AppName "InvoiceFlow"
-#define AppVersion "5.1.0"
+#define AppVersion "5.1.1"
 #define AppPublisher "InvoiceFlow"
 #define AppExeName "InvoiceFlow.exe"
 

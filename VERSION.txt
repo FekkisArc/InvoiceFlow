@@ -1,2 +1,2 @@
-InvoiceFlow 5.1.0
+InvoiceFlow 5.1.1
 Major OCR, data-integrity, import, review, backup and reporting upgrade

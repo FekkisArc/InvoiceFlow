@@ -3,7 +3,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 title Build InvoiceFlow Windows Installer
 echo ============================================================
-echo InvoiceFlow 5.1.0 - Windows installer build
+echo InvoiceFlow 5.1.1 - Windows installer build
 echo ============================================================
 echo This build must run on Windows x64.
 echo.
@@ -92,7 +92,7 @@ echo [6/6] Compiling the Windows setup wizard...
 if errorlevel 1 goto :failed
 
 echo.
-echo SUCCESS. Installer output is in installer-output\InvoiceFlow_Setup_5.1.0.exe
+echo SUCCESS. Installer output is in installer-output\InvoiceFlow_Setup_5.1.1.exe
 echo You can now test it on a Windows 11 x64 PC.
 pause
 exit /b 0

@@ -4,7 +4,30 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import tkinter as tk
 from tkinter import filedialog, messagebox
-import webview
+
+# Import application modules before WebView so a missing/broken WebView runtime
+# can still be logged and reported to the user in a windowed executable.
+import main as core
+import workspace_features as features
+try:
+    import webview
+except Exception as _webview_import_error:
+    _webview_details = traceback.format_exc()
+    _webview_log = core.BASE / "app.log"
+    try:
+        core.log_error("FATAL WEBVIEW IMPORT ERROR\n" + _webview_details)
+    except Exception:
+        pass
+    try:
+        messagebox.showerror(
+            "InvoiceFlow could not start",
+            "The embedded desktop browser could not be loaded.\n\n"
+            f"{type(_webview_import_error).__name__}: {_webview_import_error}\n\n"
+            f"Diagnostic log: {_webview_log}"
+        )
+    except Exception:
+        pass
+    raise
 
 # Support source runs and PyInstaller 6+ onedir packages.
 # PyInstaller 6+ places bundled data files in sys._MEIPASS (usually _internal),
@@ -17,13 +40,11 @@ if BUNDLED_TESSDATA.is_dir():
     # or TESSDATA_PREFIX. Tesseract's executable is installed by the setup wizard.
     os.environ["TESSDATA_PREFIX"] = str(BUNDLED_TESSDATA)
 
-import main as core
-import workspace_features as features
 state={"busy":False,"done":True,"percent":0,"message":"Ready","detail":"Local processing · OCR runs on your PC"}
 lock=threading.Lock()
 
 UPDATE_CONFIG_PATH = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "InvoiceOCR" / "update_config.json"
-APP_VERSION = "5.1.0"
+APP_VERSION = "5.1.1"
 
 def _read_update_config():
     """Prefer the user's config; fall back to the bundled public repo config."""
@@ -66,6 +87,32 @@ def _latest_release():
     return {"version":tag, "url":url, "asset_name":asset["name"],
             "release_url":release.get("html_url", ""), "digest":asset.get("digest", ""),
             "size":int(asset.get("size") or 0)}
+
+def _report_fatal_startup_error(exc_type, exc, tb):
+    """Persist startup failures and show a useful dialog in windowed builds."""
+    details = "".join(traceback.format_exception(exc_type, exc, tb))
+    log_path = core.BASE / "app.log"
+    try:
+        core.log_error("FATAL STARTUP ERROR\n" + details)
+    except Exception:
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("a", encoding="utf-8") as handle:
+                handle.write("\nFATAL STARTUP ERROR\n" + details + "\n")
+        except Exception:
+            pass
+    try:
+        from tkinter import messagebox
+        messagebox.showerror(
+            "InvoiceFlow could not start",
+            "InvoiceFlow encountered an error while starting.\n\n"
+            f"{type(exc).__name__}: {exc}\n\n"
+            f"The full diagnostic information was saved to:\n{log_path}\n\n"
+            "Please send that log to support so the problem can be fixed."
+        )
+    except Exception:
+        pass
+
 
 class API:
     window=None
@@ -649,5 +696,9 @@ def main():
     api.window=window
     webview.start(debug=False)
 
-if __name__=="__main__":
-    main()
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        _report_fatal_startup_error(*sys.exc_info())
+        raise SystemExit(1)

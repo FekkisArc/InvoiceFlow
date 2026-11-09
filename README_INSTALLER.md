@@ -1,6 +1,6 @@
-# InvoiceFlow 5.1.0 — Windows installer build
+# InvoiceFlow 5.1.1 — Windows installer build
 
-This project builds a Windows 11 x64 setup wizard named `InvoiceFlow_Setup_5.1.0.exe`.
+This project builds a Windows 11 x64 setup wizard named `InvoiceFlow_Setup_5.1.1.exe`.
 
 ## What the installer includes
 - InvoiceFlow desktop app packaged with PyInstaller (the target PC does not need Python installed).
@@ -20,9 +20,9 @@ Run `build_windows_installer.bat`. The script checks Python 3.15, downloads the 
 
 Expected output:
 
-`installer-output\\InvoiceFlow_Setup_5.1.0.exe`
+`installer-output\\InvoiceFlow_Setup_5.1.1.exe`
 
-The same build recipe runs in `.github/workflows/windows-installer.yml`. Workflow artifacts are uploaded for both `main` builds and version-tag builds. A tag push (for example `v5.1.0`) also publishes the installer to the GitHub Release.
+The same build recipe runs in `.github/workflows/windows-installer.yml`. Workflow artifacts are uploaded for both `main` builds and version-tag builds. A tag push (for example `v5.1.1`) also publishes the installer to the GitHub Release.
 
 ## Installation and data safety
 Administrator permission is required because the Tesseract engine is installed under Program Files. Invoice database, original documents, exports and settings remain under `%LOCALAPPDATA%\\InvoiceOCR`; the setup does not intentionally delete them during upgrades or uninstall.
